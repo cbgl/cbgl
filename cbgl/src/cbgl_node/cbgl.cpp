@@ -95,7 +95,8 @@ CBGL::CBGL(
 
   /* Call me for a fun time */
   global_localisation_service_ =
-    nh_.advertiseService(global_localisation_service_name_,
+    nh_.advertiseService(
+      ros::this_node::getName() + "/" + global_localisation_service_name_,
       &CBGL::startSignalService, this);
 
   ROS_INFO("[CBGL] BORN READY");

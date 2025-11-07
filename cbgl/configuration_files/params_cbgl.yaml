@@ -13,7 +13,7 @@ scan_topic: "/scan"
 output_pose_topic: "/initialpose"
 
 # call me
-global_localisation_service_name: "/global_localization"
+global_localisation_service_name: "global_localization"
 
 # Pose densities. The product dl x da determines how many pose hypotheses are
 # dispersed per square meter of map area within the map. The higher the density

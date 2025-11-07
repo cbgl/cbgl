@@ -1,11 +1,8 @@
 <launch>
-
-  <arg name="namespace" default="/sfr"/>
-
+  <arg name="namespace" default="robot"/>
   <group ns="$(arg namespace)">
 
     <node pkg="cbgl" type="cbgl_node" name="cbgl_node" output="screen">
-
       <!-- General parameters -->
       <rosparam command="load" file="$(find cbgl)/configuration_files/params_cbgl.yaml" />
 
@@ -14,8 +11,7 @@
 
       <!-- FSM parameters (when FOV = 2π) -->
       <rosparam command="load" file="$(find cbgl)/configuration_files/params_fsm.yaml" />
-
     </node>
-  </group>
 
+  </group>
 </launch>
