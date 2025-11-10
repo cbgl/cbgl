@@ -102,7 +102,7 @@ docker run -it \
 Launching `cbgl` simply makes it go into stand-by mode and does not actually localise your sensor. To do so simply call the provided service
 
 ```sh
-docker exec -it cbgl sh -c "source ~/catkin_ws/devel/setup.bash; rosservice call "
+docker exec -it cbgl sh -c "source ~/catkin_ws/devel/setup.bash; rosservice call /robot/cbgl_node/global_localization"
 ```
 
 ## Input/output at a glance
