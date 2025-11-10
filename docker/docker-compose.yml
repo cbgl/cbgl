@@ -5,7 +5,7 @@ services:
       dockerfile: docker/Dockerfile
 
     image: li9i/cbgl:latest
-    container_name: cbgl_container
+    container_name: cbgl
 
     stdin_open: true
     tty: true

@@ -91,7 +91,7 @@ or, in any case, you may run the image with
 
 ```sh
 docker run -it \
-    --name=container_cbgl \
+    --name=cbgl \
     --net=host \
     --rm \
     li9i/cbgl:latest
@@ -102,7 +102,7 @@ docker run -it \
 Launching `cbgl` simply makes it go into stand-by mode and does not actually localise your sensor. To do so simply call the provided service
 
 ```sh
-docker exec -it cbgl_container sh -c "source ~/catkin_ws/devel/setup.bash; rosservice call "
+docker exec -it cbgl sh -c "source ~/catkin_ws/devel/setup.bash; rosservice call "
 ```
 
 ## Input/output at a glance
