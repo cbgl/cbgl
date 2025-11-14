@@ -107,12 +107,12 @@ docker exec -it cbgl sh -c "source ~/catkin_ws/devel/setup.bash; rosservice call
 
 ## Input/output at a glance
 
-| i/o | What                                                                                                                |
-| --- | ------------------------------------------------------------------------------------------------------------------- |
-| in  | A `sensor_msgs/LaserScan` message published through topic `configuration_files/scan_topic`                          |
-| in  | A `nav_msgs/OccupancyGrid` message published through topic `configuration_files/map_topic`                          |
-| out | A `geometry_msgs/PoseWithCovarianceStamped` message published through topic `configuration_files/output_pose_topic` |
-| out | The transform between the `odom` frame and the `map` frame if `configuration_files/tf_broadcast` is set to `true`   |
+| i/o | Type                                      | What                                                                                                              |
+| --- | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| in  | `sensor_msgs/LaserScan`                   | The scan message received via topic `configuration_files/scan_topic`                                              |
+| in  | `nav_msgs/OccupancyGrid`                  | The map received via topic `configuration_files/map_topic`                                                        |
+| out | `geometry_msgs/PoseWithCovarianceStamped` | The output pose published through topic `configuration_files/output_pose_topic`                                   |
+| out | Transform                                 | The transform between the `odom` frame and the `map` frame if `configuration_files/tf_broadcast` is set to `true` |
 
 ## Motivation
 
