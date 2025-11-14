@@ -107,12 +107,12 @@ docker exec -it cbgl sh -c "source ~/catkin_ws/devel/setup.bash; rosservice call
 
 ## Input/output at a glance
 
-| i/o | Type                                      | What                                                                                                              |
-| --- | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| in  | `sensor_msgs/LaserScan`                   | The scan message received via topic `configuration_files/scan_topic`                                              |
-| in  | `nav_msgs/OccupancyGrid`                  | The map received via topic `configuration_files/map_topic`                                                        |
-| out | `geometry_msgs/PoseWithCovarianceStamped` | The output pose published through topic `configuration_files/output_pose_topic`                                   |
-| out | Transform                                 | The transform between the `odom` frame and the `map` frame if `configuration_files/tf_broadcast` is set to `true` |
+| i/o | Type                                                                                                                                   | What                                                                                                                                                                          |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| in  | [`sensor_msgs/LaserScan`](https://docs.ros.org/en/kinetic/api/sensor_msgs/html/msg/LaserScan.html)                                     | The scan message received via topic [`configuration_files/params_cbgl/scan_topic`](cbgl/configuration_files/params_cbgl.yaml#L10)                                             |
+| in  | [`nav_msgs/OccupancyGrid`](https://docs.ros.org/en/kinetic/api/nav_msgs/html/msg/OccupancyGrid.html)                                   | The map received via topic [`configuration_files/params_cbgl/map_topic`](cbgl/configuration_files/params_cbgl.yaml#L9)                                                        |
+| out | [`geometry_msgs/PoseWithCovarianceStamped`](https://docs.ros.org/en/kinetic/api/geometry_msgs/html/msg/PoseWithCovarianceStamped.html) | The output pose published through topic [`configuration_files/params_cbgl/output_pose_topic`](cbgl/configuration_files/params_cbgl.yaml#L13)                                  |
+| out | Transform                                                                                                                              | The transform between the `odom` frame and the `map` frame if [`configuration_files/params_cbgl/tf_broadcast`](cbgl/configuration_files/params_cbgl.yaml#L6) is set to `true` |
 
 ## Motivation
 
