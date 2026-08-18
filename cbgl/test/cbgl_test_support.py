@@ -360,12 +360,21 @@ class Harness(Node):
     transform tree cannot be divided that way, being one tree, so a case that
     needs a placement to be missing withholds a placement for the frame its own
     scan names rather than a topic.
+
+    The scan publisher's reliability and queue depth can be given too, and
+    default to what a scan is published with everywhere else here. A best effort
+    publisher is the only way to ask whether a node configured for best effort
+    really subscribed that way: a reliable subscription does not match a best
+    effort publisher and receives nothing at all from it, so a setting that never
+    reached the subscription shows up as a run with no scan rather than as a
+    passing case.
     """
 
     def __init__(self, node_name='cbgl', output_pose_topic='/initialpose',
                  hypotheses_topic='', top_hypotheses_topic='',
                  map_scan_topic='', map_topic=MAP_TOPIC,
-                 scan_topic=SCAN_TOPIC):
+                 scan_topic=SCAN_TOPIC, scan_reliability='reliable',
+                 scan_depth=1):
         super().__init__(node_name + '_harness')
 
         self.node_name = node_name
@@ -407,7 +416,13 @@ class Harness(Node):
                                                    latched)
         self.static_transform_publisher = self.create_publisher(
             TFMessage, '/tf_static', latched)
-        self.scan_publisher = self.create_publisher(LaserScan, scan_topic, 1)
+        scanning = QoSProfile(depth=scan_depth)
+        scanning.reliability = (
+            ReliabilityPolicy.RELIABLE if scan_reliability == 'reliable'
+            else ReliabilityPolicy.BEST_EFFORT)
+
+        self.scan_publisher = self.create_publisher(
+            LaserScan, scan_topic, scanning)
 
         self.transform_publisher = self.create_publisher(
             TFMessage, '/tf', 100)

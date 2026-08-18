@@ -71,6 +71,21 @@
  * occupancy grid comes is a map with nothing in range, which the matcher
  * refuses on its own first cast, and that is
  * `AMapWithNothingInRangeIsRefusedBeforeAnUnscorablePoseCanWin`.
+ * **The matcher's five refusals, as a run through this library meets them.** A
+ * survivor standing off free space is reached by hypotheses inside the wall, a
+ * first cast that met nothing by a map with nothing standing in it, and a spent
+ * recovery budget by a translation bound smaller than the cell the refinement
+ * has to cross. The remaining two, a scan too short and a scan carrying nothing
+ * usable, cannot reach the matcher through this library at all, because the
+ * library decides both before a hypothesis is drawn. They are pinned against
+ * the matcher's own copies of the same two rules by `ScanRefusalSeam` and, from
+ * the other side of the boundary, by
+ * `AScanTheSeamHasNoBusinessRefusingIsRefusedByNeitherLayer`.
+ * **A measurement that carries no information.** A scan reading the sensor's
+ * maximum range on every ray is refused by nothing and answered coherently,
+ * while saying nothing at all about where the sensor was. What the metric ranks
+ * by in that case is how much space a pose can see, which is pinned so that a
+ * later decision to treat it differently is a decision rather than an accident.
  * **What the density is set to.** Fifteen hypothesis positions per square metre
  * of free space, which is what the package ships. The room is the same at both
  * cell sizes and so is its free area, so the same density draws the same number
@@ -86,6 +101,7 @@
 #include <cstdint>
 #include <expected>
 #include <fstream>
+#include <limits>
 #include <map>
 #include <memory>
 #include <numeric>
@@ -106,6 +122,7 @@ using cbgl::Parameters;
 using cbgl::Point;
 using cbgl::Pose;
 using cbgl::Result;
+using cbgl::ScoredPose;
 using fsm_localisation::CastingMethod;
 using fsm_localisation::CellCoordinates;
 using fsm_localisation::CorrectionError;
@@ -165,6 +182,43 @@ struct GridFixture
 };
 
 /**
+ * @brief One scan both this library and the matcher have to refuse, and the
+ * reason each of them has to give for it.
+ * @details `rays` rays, every one of them `range`. The four ways a lidar reports
+ * a ray it could not trust are one case each, since each is a separate encoding
+ * of the same thing and either layer could stop recognising one of them without
+ * the other noticing, and the length boundary is one more.
+ */
+struct SeamCase
+{
+  const char* label{""};
+  double range{0.0};
+  std::size_t rays{0};
+  Error::Reason library{Error::Reason::scan_entirely_invalid};
+  CorrectionError matcher{CorrectionError::scan_entirely_invalid};
+};
+
+const SeamCase kSeamCases[] = {
+  SeamCase{.label = "every_ray_zero", .range = 0.0, .rays = kRayCount,
+    .library = Error::Reason::scan_entirely_invalid,
+    .matcher = CorrectionError::scan_entirely_invalid},
+  SeamCase{.label = "every_ray_infinite",
+    .range = std::numeric_limits<double>::infinity(), .rays = kRayCount,
+    .library = Error::Reason::scan_entirely_invalid,
+    .matcher = CorrectionError::scan_entirely_invalid},
+  SeamCase{.label = "every_ray_not_a_number",
+    .range = std::numeric_limits<double>::quiet_NaN(), .rays = kRayCount,
+    .library = Error::Reason::scan_entirely_invalid,
+    .matcher = CorrectionError::scan_entirely_invalid},
+  SeamCase{.label = "every_ray_negative", .range = -1.0, .rays = kRayCount,
+    .library = Error::Reason::scan_entirely_invalid,
+    .matcher = CorrectionError::scan_entirely_invalid},
+  SeamCase{.label = "one_ray_short_of_the_size_asked_for", .range = 1.0,
+    .rays = kRayCount - 1U,
+    .library = Error::Reason::scan_too_short,
+    .matcher = CorrectionError::scan_too_short}};
+
+/**
  * @brief A reference that calls every position free and casts every ray at
  * zero.
  * @details Zero on every ray is what a caster really reports for a sensor
@@ -199,6 +253,10 @@ class LocaliserOnAFineGrid : public testing::TestWithParam<GridCase>
 };
 
 class LocaliserOnEveryGrid : public testing::TestWithParam<GridCase>
+{
+};
+
+class ScanRefusalSeam : public testing::TestWithParam<SeamCase>
 {
 };
 
@@ -373,6 +431,20 @@ std::vector<Pose> readTruth(const std::string& name)
   return poses;
 }
 
+std::string seamCaseSuffix(const testing::TestParamInfo<SeamCase>& info)
+{
+  return info.param.label;
+}
+
+/**
+ * @brief How much range a cast carries in total, which is the only thing a
+ * measurement entirely at its maximum range can rank a candidate by.
+ */
+double totalOf(const std::vector<double>& ranges)
+{
+  return std::accumulate(ranges.begin(), ranges.end(), 0.0);
+}
+
 /**
  * @brief The same grid, with every one of its cells free.
  * @details A map that describes free space and nothing standing in it. The
@@ -538,6 +610,147 @@ TEST(Localiser, AMapWithNothingInRangeIsRefusedBeforeAnUnscorablePoseCanWin)
 }
 
 /**
+ * @brief A measurement carrying nothing but its own maximum range is answered,
+ * and what the answer is ranked by is how much space a pose can see.
+ * @details
+ * A scan every ray of which reads the sensor's maximum range is a scan that met
+ * nothing at all. Nothing refuses it: the maximum range is a valid reading per
+ * `fsm_localisation::isValidRange`, so the scan is neither unusable nor short,
+ * and a cast taken inside a bounded room is never entirely at that maximum
+ * either, so the metric grades every candidate rather than ranking it behind
+ * everything that scored.
+ * What the metric then computes, ray by ray, is `range_max - cast_i`, since a
+ * cast inside the room is shorter than the maximum everywhere. Summed, that is
+ * `n * range_max - sum(cast_i)`. The measurement enters the expression only
+ * through its own maximum, which every candidate shares, so the ranking is by
+ * the total of the cast and by nothing else: the position that sees the most
+ * space wins, wherever the sensor actually stood. Rotating a cast does not
+ * change its total, so all `da` orientations of that position tie, and the
+ * survivors are `top_k_caers` of them chosen by nothing.
+ * The run is therefore answered, coherently, from a measurement that says
+ * nothing whatever about where the sensor was. That is not a defect: no
+ * requirement asks this library to notice a measurement carrying no
+ * information, and the pose it reports does stand on free space of the map. It
+ * is pinned here so that a later decision to refuse such a run, or to report it
+ * as anything other than an ordinary answer, is a decision somebody made rather
+ * than a change nobody noticed.
+ * @remark The hypothesis set is handed in as every free cell of the map rather
+ * than drawn, so that the cell the ranking has to pick is a cell the search was
+ * certainly offered, and so that the winner can be computed here from the casts
+ * themselves.
+ */
+TEST(Localiser, AMeasurementEntirelyAtItsMaximumRangeIsRankedByTheSpaceSeen)
+{
+  const GridFixture fixture = readGrid("pillar_room_grid_coarse.csv");
+  const std::shared_ptr<const OccupancyGridMap> map = mapOf(fixture);
+  ASSERT_NE(map, nullptr);
+
+  const FreeSpace free_space = freeSpaceOfMap(*map);
+  ASSERT_FALSE(free_space.cells.empty());
+
+  const std::vector<double> measured(kRayCount, kRangeMax);
+
+  ASSERT_TRUE(std::ranges::all_of(measured, fsm_localisation::isValidRange))
+    << "every ray of this measurement reads the maximum range, which is a "
+    << "usable reading rather than one of the three ways a lidar reports a ray "
+    << "it could not trust. Without that the case would be about an unusable "
+    << "scan and not about an uninformative one.";
+
+  std::vector<Pose> hypotheses;
+  for (const Point& cell : free_space.cells)
+    hypotheses.push_back(Pose{.x = cell.x, .y = cell.y, .t = 0.0});
+
+  const double tolerance =
+    1024.0 * std::numeric_limits<double>::epsilon() * kRayCount * kRangeMax;
+
+  Pose best_seen{};
+  double most_space = -1.0;
+  double next_most_space = -1.0;
+
+  for (const Pose& hypothesis : hypotheses)
+  {
+    const std::vector<double> cast =
+      map->ranges(hypothesis, kRayCount, kRangeMax);
+
+    ASSERT_TRUE(std::ranges::all_of(cast, [](const double range)
+        { return range > 0.0 && range < kRangeMax; }))
+      << "a cast from the free cell at (" << hypothesis.x << ", "
+      << hypothesis.y << ") carries a ray at nothing or a ray at the maximum "
+      << "range, so the score below is not the sum of range_max - cast_i that "
+      << "this case computes it as.";
+
+    const double space = totalOf(cast);
+
+    if (space > most_space)
+    {
+      next_most_space = most_space;
+      most_space = space;
+      best_seen = hypothesis;
+    }
+    else if (space > next_most_space)
+      next_most_space = space;
+  }
+
+  ASSERT_GT(most_space - next_most_space, tolerance)
+    << "two free cells of this map see the same total to within " << tolerance
+    << " metres summed over " << kRayCount << " rays, so which of them a "
+    << "ranking by that total prefers is a coin toss and this case has no "
+    << "single cell to hold the survivors to.";
+
+  const Localiser localiser(parametersOf(kTopK), map, free_space);
+
+  const std::expected<Result, Error> result =
+    localiser.localise(measured, kRangeMax, hypotheses);
+
+  ASSERT_TRUE(result.has_value())
+    << "a measurement entirely at its own maximum range is answered today, "
+    << "rather than refused. If that has deliberately changed, this case is "
+    << "what has to be rewritten to say so.";
+
+  EXPECT_TRUE(map->isFree(result->pose.x, result->pose.y))
+    << "the answer stands at (" << result->pose.x << ", " << result->pose.y
+    << "), which this map does not call free. An uninformative answer is still "
+    << "expected to be a coherent one.";
+
+  ASSERT_EQ(result->survivors.size(), kTopK);
+
+  for (std::size_t s = 0; s < result->survivors.size(); s++)
+  {
+    const ScoredPose& survivor = result->survivors[s];
+
+    EXPECT_EQ(survivor.pose.x, best_seen.x)
+      << "survivor " << s << " stands at (" << survivor.pose.x << ", "
+      << survivor.pose.y << ") where the free cell that sees the most space is "
+      << "(" << best_seen.x << ", " << best_seen.y << "), which sees "
+      << most_space << " metres of range against " << next_most_space
+      << " for the next best. A measurement entirely at the maximum range "
+      << "scores a candidate by the total of its cast alone, so every survivor "
+      << "has to stand at that one cell.";
+    EXPECT_EQ(survivor.pose.y, best_seen.y);
+
+    const std::vector<double> cast =
+      map->ranges(survivor.pose, kRayCount, kRangeMax);
+
+    const double closed_form = kRayCount * kRangeMax - totalOf(cast);
+
+    EXPECT_NEAR(survivor.score, closed_form, tolerance)
+      << "survivor " << s << " scored " << survivor.score << " where summing "
+      << "range_max - cast_i over the " << kRayCount << " rays of a fresh cast "
+      << "at the same pose gives " << closed_form << ". The measurement is the "
+      << "maximum range on every ray, so the two are the same sum in two "
+      << "orderings and may differ only by the rounding of that.";
+
+    EXPECT_NEAR(survivor.score, result->survivors.front().score, tolerance)
+      << "survivor " << s << " scored " << survivor.score << " and the first "
+      << "survivor scored " << result->survivors.front().score << ". The "
+      << kTopK << " survivors are " << kTopK << " orientations of one position, "
+      << "and rotating a cast does not change its total, so the sift cannot "
+      << "prefer any of them to any other. That the answer is one of them is "
+      << "arbitrary, and that is the whole of what this case records.";
+  }
+}
+
+/**
  * @brief An empty hypothesis set is refused for being empty.
  * @details The three argument entry point exists so a caller can hand in a
  * hypothesis set of its own, and an empty one is the caller's doing rather than
@@ -592,23 +805,6 @@ TEST(Localiser, AnEmptyHypothesisSetIsRefusedForBeingEmpty)
     << "about nothing else in the run.";
 }
 
-/**
- * @brief A scan carrying more rays than the matcher asks for is reduced to that
- * many, and the pose is still recovered.
- * @details Every other case here hands in exactly as many rays as `size_scan`
- * asks for, which leaves untouched the branch that interpolates a scan and
- * resamples it. A real sensor reports whatever it reports and the parameter
- * decides what the run works at, so that branch carries every run of a scan
- * finer than the setting.
- * The bound is the two cells of a scan the map itself cast, and it is the same
- * bound for the same reason: reducing a cast of twice as many rays onto this
- * many is the coarser cast itself. Ray `i` of `n` leaves a pose at
- * `i * 2*M_PI / n + pose.t - M_PI`, so ray `2 * j` of a cast of `2 * n` leaves
- * at `j * 2*M_PI / n + pose.t - M_PI`, which is ray `j` of the cast of `n`. The
- * two therefore differ by no more than the rounding of one of those
- * expressions against the other, and nothing about the search should notice
- * which of the two it was handed.
- */
 /**
  * @brief A pose the metric cannot grade is refused rather than reported, even
  * where the refinement accepted it.
@@ -703,6 +899,59 @@ TEST(Localiser, AReferenceThatCastsNothingFromAFreePoseYieldsNoAnswer)
     << "the matcher's to count. A count here would name the wrong stage.";
 }
 
+/**
+ * @brief A scan carrying more rays than the matcher asks for is reduced to that
+ * many, and the pose is still recovered.
+ * @details Every other case here hands in exactly as many rays as `size_scan`
+ * asks for, which leaves untouched the branch that interpolates a scan and
+ * resamples it. A real sensor reports whatever it reports and the parameter
+ * decides what the run works at, so that branch carries every run of a scan
+ * finer than the setting.
+ * The bound is the two cells of a scan the map itself cast, and it is the same
+ * bound for the same reason: reducing a cast of twice as many rays onto this
+ * many is the coarser cast itself. Ray `i` of `n` leaves a pose at
+ * `i * 2*M_PI / n + pose.t - M_PI`, so ray `2 * j` of a cast of `2 * n` leaves
+ * at `j * 2*M_PI / n + pose.t - M_PI`, which is ray `j` of the cast of `n`. The
+ * two therefore differ by no more than the rounding of one of those
+ * expressions against the other, and nothing about the search should notice
+ * which of the two it was handed.
+ */
+/**
+ * @brief A scan carrying no rays at all is refused, and refused for its length.
+ * @details The ROS 1 build read the first range of a scan before establishing
+ * that the scan carried one, so a message with an empty range vector read
+ * before the start of it. Nothing here indexes a scan: the node copies the
+ * whole vector and the library asks only for its size. This case pins the
+ * degenerate end of that, an empty scan being simply the shortest scan there
+ * is, so it is refused by the same rule and under the same reason as any other
+ * scan too short to reduce.
+ * @remark The neighbouring case refuses a scan of a tenth of the rays the
+ * matcher asks for. That one shows the rule works; this one shows it does not
+ * stop working at zero, which is where an index would have been read.
+ */
+TEST(Localiser, AScanCarryingNoRaysAtAllIsRefused)
+{
+  const GridFixture fixture = readGrid("pillar_room_grid_coarse.csv");
+  const std::shared_ptr<const OccupancyGridMap> map = mapOf(fixture);
+  ASSERT_NE(map, nullptr);
+
+  const Localiser localiser(parametersOf(kTopK), map, freeSpaceOfMap(*map));
+
+  const std::vector<double> no_rays;
+
+  const std::expected<Result, Error> result =
+    localiser.localise(no_rays, kRangeMax);
+
+  ASSERT_FALSE(result.has_value())
+    << "the matcher is set to " << kRayCount << " rays and the scan carries "
+    << "none, so there is nothing to reduce and nothing to score against.";
+
+  EXPECT_EQ(result.error().reason, Error::Reason::scan_too_short)
+    << "an empty scan is the shortest scan there is, so it is refused for its "
+    << "length rather than for carrying no usable range: the second would "
+    << "suggest the rays were there and unusable.";
+}
+
 TEST(Localiser, AScanOfMoreRaysThanTheMatcherAsksForIsReducedAndStillRecovers)
 {
   const GridFixture fixture = readGrid("pillar_room_grid_fine.csv");
@@ -757,87 +1006,6 @@ TEST(Localiser, AScanOfMoreRaysThanTheMatcherAsksForIsReducedAndStillRecovers)
     << "search reported " << result->pose.t << ".";
 }
 
-/**
- * @brief The two scan refusals this library decides are the matcher's own
- * refusals under another name, and must stay that way.
- * @details A scan shorter than `size_scan`, and a scan carrying no usable
- * range, are both refused here before a hypothesis is drawn, and both are
- * refused again by `fsm_localisation::Corrector::correct` when a survivor
- * reaches it. The duplication is deliberate: each is required to be a distinct
- * reason of this library's own, and deferring to the matcher would report both
- * as every survivor having been refused, which names the refinement for a fault
- * in the measurement.
- * Two definitions of one rule can part company. This case pins them: the very
- * scan this library refuses is handed to the matcher, and the matcher has to
- * refuse it for its own equivalent reason. If the matcher ever changes what
- * either means, this goes red rather than the two quietly disagreeing.
- */
-TEST(Localiser, AScanRefusedHereIsRefusedByTheMatcherForTheSameThing)
-{
-  const GridFixture fixture = readGrid("pillar_room_grid_coarse.csv");
-  const std::shared_ptr<const OccupancyGridMap> map = mapOf(fixture);
-  ASSERT_NE(map, nullptr);
-
-  const std::vector<Pose> room_poses = readTruth(kTruthFixture);
-  ASSERT_FALSE(room_poses.empty())
-    << "the truth fixture " << kTruthFixture << " named no pose, so there is "
-    << "no free pose to hand the matcher.";
-
-  const Pose truth = worldFromRoom(*map, fixture.origin_yaw, room_poses[0]);
-  ASSERT_TRUE(map->isFree(truth.x, truth.y))
-    << "the estimate handed to the matcher must stand on free space, or it "
-    << "refuses for that instead and the case measures the wrong rule.";
-
-  const Parameters parameters = parametersOf(kTopK);
-
-  const Corrector corrector(parameters.matcher, map);
-  const Localiser localiser(parameters, map, freeSpaceOfMap(*map));
-
-  const std::vector<double> too_short(kRayCount / 36U, 1.0);
-
-  const std::expected<Result, Error> library_on_short =
-    localiser.localise(too_short, kRangeMax);
-
-  ASSERT_FALSE(library_on_short.has_value());
-  ASSERT_EQ(library_on_short.error().reason, Error::Reason::scan_too_short);
-
-  const std::expected<fsm_localisation::CorrectionResult, CorrectionError>
-    matcher_on_short = corrector.correct(too_short, truth, kRangeMax);
-
-  ASSERT_FALSE(matcher_on_short.has_value())
-    << "this library refuses a scan of " << too_short.size() << " rays as "
-    << "shorter than the " << parameters.matcher.size_scan << " the matcher "
-    << "asks for, and the matcher accepted it. The two no longer mean the same "
-    << "thing by too short, and the earlier of the two checks is now guessing.";
-
-  EXPECT_EQ(matcher_on_short.error(), CorrectionError::scan_too_short)
-    << "the matcher refused the same scan for a different reason, so what this "
-    << "library reports as a scan too short is no longer what the matcher "
-    << "would have called it.";
-
-  const std::vector<double> unusable(kRayCount, 0.0);
-
-  const std::expected<Result, Error> library_on_unusable =
-    localiser.localise(unusable, kRangeMax);
-
-  ASSERT_FALSE(library_on_unusable.has_value());
-  ASSERT_EQ(library_on_unusable.error().reason,
-    Error::Reason::scan_entirely_invalid);
-
-  const std::expected<fsm_localisation::CorrectionResult, CorrectionError>
-    matcher_on_unusable = corrector.correct(unusable, truth, kRangeMax);
-
-  ASSERT_FALSE(matcher_on_unusable.has_value())
-    << "this library refuses a scan of " << unusable.size() << " rays that "
-    << "carries no usable range, and the matcher accepted it. One of the two "
-    << "has changed its mind about what a usable range is.";
-
-  EXPECT_EQ(matcher_on_unusable.error(), CorrectionError::scan_entirely_invalid)
-    << "the matcher refused the same scan for a different reason, so what this "
-    << "library reports as a scan carrying nothing usable is no longer what "
-    << "the matcher would have called it.";
-}
-
 TEST(Localiser, AScanShorterThanTheMatcherAsksForIsRefused)
 {
   const GridFixture fixture = readGrid("pillar_room_grid_coarse.csv");
@@ -857,6 +1025,88 @@ TEST(Localiser, AScanShorterThanTheMatcherAsksForIsRefused)
     << "of the run works at.";
 
   EXPECT_EQ(result.error().reason, Error::Reason::scan_too_short);
+}
+
+/**
+ * @brief The other side of the seam: a scan neither layer is entitled to refuse.
+ * @details The two rules the seam is made of are each a boundary, and a copy of
+ * a rule can be wrong by refusing too much as easily as by refusing too little.
+ * Exactly `size_scan` rays is the shortest scan that is not too short, and one
+ * usable ray is the least a scan can carry and still carry something, so this is
+ * the scan that stands one step inside both rules at once. Neither layer may
+ * call it short and neither may call it unusable, whatever else either of them
+ * then makes of it.
+ * @remark What the run goes on to report is not asserted. A scan of one usable
+ * ray is interpolated into a scan of one range repeated, which describes a
+ * circular room and not this one, so where the search puts the sensor is not
+ * something this case has any business pinning.
+ */
+TEST(Localiser, AScanTheSeamHasNoBusinessRefusingIsRefusedByNeitherLayer)
+{
+  const GridFixture fixture = readGrid("pillar_room_grid_coarse.csv");
+  const std::shared_ptr<const OccupancyGridMap> map = mapOf(fixture);
+  ASSERT_NE(map, nullptr);
+
+  const std::vector<Pose> room_poses = readTruth(kTruthFixture);
+  ASSERT_FALSE(room_poses.empty())
+    << "the truth fixture " << kTruthFixture << " named no pose, so there is "
+    << "no free pose to hand the matcher.";
+
+  const Pose truth = worldFromRoom(*map, fixture.origin_yaw, room_poses[0]);
+  ASSERT_TRUE(map->isFree(truth.x, truth.y))
+    << "the estimate handed to the matcher must stand on free space, or it "
+    << "refuses for that instead and the case measures the wrong rule.";
+
+  const Parameters parameters = parametersOf(kTopK);
+
+  std::vector<double> ranges(parameters.matcher.size_scan, 0.0);
+  ranges[ranges.size() / 2] = 1.0;
+
+  ASSERT_EQ(std::ranges::count_if(ranges, fsm_localisation::isValidRange), 1)
+    << "the scan must carry exactly one usable range, that being one more than "
+    << "the entirely unusable scan the seam does refuse.";
+
+  const Corrector corrector(parameters.matcher, map);
+  const Localiser localiser(parameters, map, freeSpaceOfMap(*map));
+
+  const std::expected<Result, Error> library =
+    localiser.localise(ranges, kRangeMax);
+
+  const bool library_called_it_short = !library.has_value() &&
+    library.error().reason == Error::Reason::scan_too_short;
+
+  EXPECT_FALSE(library_called_it_short)
+    << "the scan carries " << ranges.size() << " rays, which is exactly the "
+    << parameters.matcher.size_scan << " the matcher asks for, and this library "
+    << "refused it as shorter than that. The rule is fewer than, not fewer than "
+    << "or equal to.";
+
+  const bool library_called_it_unusable = !library.has_value() &&
+    library.error().reason == Error::Reason::scan_entirely_invalid;
+
+  EXPECT_FALSE(library_called_it_unusable)
+    << "one ray of the scan carries a usable range, so the scan does not carry "
+    << "nothing usable, and this library refused it as though it did. A copy of "
+    << "a rule that refuses one step too much throws away a scan a lidar can "
+    << "really produce.";
+
+  const std::expected<fsm_localisation::CorrectionResult, CorrectionError>
+    matcher = corrector.correct(ranges, truth, kRangeMax);
+
+  const bool matcher_called_it_short = !matcher.has_value() &&
+    matcher.error() == CorrectionError::scan_too_short;
+
+  EXPECT_FALSE(matcher_called_it_short)
+    << "the matcher refused a scan of exactly the " << parameters.matcher.size_scan
+    << " rays it asks for as too short, so the two layers no longer agree on "
+    << "where the boundary of that rule is.";
+
+  const bool matcher_called_it_unusable = !matcher.has_value() &&
+    matcher.error() == CorrectionError::scan_entirely_invalid;
+
+  EXPECT_FALSE(matcher_called_it_unusable)
+    << "the matcher refused a scan carrying one usable range as carrying none, "
+    << "so the two layers no longer agree on what a usable range is.";
 }
 
 TEST(Localiser, AScanWithNoUsableRangeIsRefused)
@@ -1160,9 +1410,202 @@ TEST_P(LocaliserOnEveryGrid, APoseIsRecoveredFromAScanTheMapItselfCast)
   }
 }
 
+/**
+ * @brief A refinement bounded to less than the cell it has to cross spends its
+ * whole recovery budget, and the run says so.
+ * @details
+ * This is the fifth and last of the matcher's refusals that a run through this
+ * library can meet. Four of the five are reached elsewhere in this file and in
+ * `test_parameters`: a scan too short and a scan carrying nothing usable are
+ * pinned on both sides of the seam by `ScanRefusalSeam`, a hypothesis standing
+ * off free space by `EverySurvivorRefusedByTheMatcherRefusesTheRun`, and a first
+ * cast that met nothing by
+ * `AMapWithNothingInRangeIsRefusedBeforeAnUnscorablePoseCanWin`.
+ * **Why a bound below the cell size is the honest way to reach it.** A survivor
+ * of the sift stands at the centre of a free cell, so the truth can be half a
+ * cell diagonal away from it, which is `resolution * sqrt(2) / 2`. The
+ * translation stage abandons a candidate that has moved further than `xy_bound`
+ * from where the stage began and treats that as a failure, and a failure is what
+ * starts a recovery. A bound of a quarter of that half diagonal therefore cannot
+ * reach the truth from where the sift left off, however good the measurement is:
+ * every attempt fails, every failure spends a recovery, and the budget runs out.
+ * Nothing about the room, the map or the scan is contrived to produce it. The
+ * scan is the cast the map itself gives at a pose of the fixture, which every
+ * other case in this file recovers from, and the only change is a translation
+ * bound a user could set by hand without noticing it was smaller than a cell.
+ * **What is asserted, and what is left alone.** Whether the run ends in a
+ * refusal or in an answer is not asserted, because it depends on how many of the
+ * ten survivors happen to run out first, and both endings were seen while this
+ * was written. What is asserted is the reason: every survivor the matcher turned
+ * down was turned down for a spent budget and for nothing else. The control is
+ * the same room, the same scan and the same seed at the bound this package
+ * ships, which refuses no survivor at all, so the case is about the bound rather
+ * than about the room.
+ */
+TEST_P(LocaliserOnEveryGrid, ATranslationBoundBelowACellSpendsTheRecoveryBudget)
+{
+  const GridCase grid = GetParam();
+
+  const GridFixture fixture = readGrid(grid.file);
+  const std::shared_ptr<const OccupancyGridMap> map = mapOf(fixture);
+  ASSERT_NE(map, nullptr);
+
+  const std::vector<Pose> room_poses = readTruth(kTruthFixture);
+  ASSERT_FALSE(room_poses.empty())
+    << "the truth fixture " << kTruthFixture << " named no pose, so there is "
+    << "no pose to cast the measurement from.";
+
+  const Pose truth = worldFromRoom(*map, fixture.origin_yaw, room_poses[0]);
+  ASSERT_TRUE(map->isFree(truth.x, truth.y));
+
+  const std::vector<double> measured = map->ranges(truth, kRayCount, kRangeMax);
+
+  const double resolution = map->resolution();
+  const double half_cell_diagonal = resolution * std::sqrt(2.0) / 2.0;
+
+  const Localiser generous(parametersOf(kTopK), map, freeSpaceOfMap(*map));
+
+  const std::expected<Result, Error> control =
+    generous.localise(measured, kRangeMax);
+
+  ASSERT_TRUE(control.has_value())
+    << "the control run, at the bound this package ships, produced no pose on "
+    << "the " << grid.label << " grid, so the room and the scan are the "
+    << "difficulty rather than the bound.";
+
+  EXPECT_TRUE(control->refusals.empty())
+    << "the control refused a survivor at the shipped bound of "
+    << parametersOf(kTopK).matcher.xy_bound << " metres, so what the tight "
+    << "bound below causes is not the whole of what is being measured.";
+
+  Parameters bounded = parametersOf(kTopK);
+  bounded.matcher.xy_bound = half_cell_diagonal / 4.0;
+
+  ASSERT_TRUE(cbgl::validate(bounded).empty())
+    << "a translation bound of " << bounded.matcher.xy_bound << " metres has to "
+    << "be a bound the parameters accept, or this case is about a refused "
+    << "configuration and not about a spent budget: " << cbgl::validate(bounded);
+
+  const Localiser tight(bounded, map, freeSpaceOfMap(*map));
+
+  const std::expected<Result, Error> result =
+    tight.localise(measured, kRangeMax);
+
+  const std::map<CorrectionError, unsigned int>& refusals =
+    result.has_value() ? result->refusals : result.error().refusals;
+
+  unsigned int counted = 0U;
+  for (const auto& refusal : refusals)
+    counted += refusal.second;
+
+  ASSERT_GT(counted, 0u)
+    << "a refinement bounded to " << bounded.matcher.xy_bound << " metres on "
+    << "the " << grid.label << " grid, whose cells are " << resolution
+    << " metres and whose survivors therefore stand up to "
+    << half_cell_diagonal << " metres from the truth, refused nothing at all. "
+    << "The translation stage cannot have reached the truth from where the sift "
+    << "left off, so it either was not bounded or the failure it met was not "
+    << "counted.";
+
+  EXPECT_LE(counted, kTopK)
+    << "the refinement was handed at most " << kTopK << " survivors and "
+    << counted << " refusals were counted, so a survivor was counted twice.";
+
+  for (const auto& refusal : refusals)
+    EXPECT_EQ(refusal.first, CorrectionError::recovery_budget_exhausted)
+      << "a survivor was refused " << refusal.second << " times for something "
+      << "other than a spent recovery budget on the " << grid.label << " grid. "
+      << "The measurement is this map's own cast from a free cell, so nothing "
+      << "here is short, unusable, off free space or out of range: the only "
+      << "thing the tight bound can cause is a translation that fails, "
+      << "recovers, and runs out of recoveries.";
+}
+
+/**
+ * @brief The two scan refusals this library decides are the matcher's own
+ * refusals under another name, and must stay that way.
+ * @details A scan shorter than `size_scan`, and a scan carrying no usable range,
+ * are both refused here before a hypothesis is drawn, and both are refused again
+ * by `fsm_localisation::Corrector::correct` when a survivor reaches it. The
+ * duplication is deliberate: each is required to be a distinct reason of this
+ * library's own, and deferring to the matcher would report both as every
+ * survivor having been refused, which names the refinement for a fault in the
+ * measurement.
+ * Two definitions of one rule can part company. This pins them: the very scan
+ * this library refuses is handed to the matcher, and the matcher has to refuse it
+ * for its own equivalent reason. If the matcher ever changes what either means,
+ * this goes red rather than the two quietly disagreeing.
+ * **Every flavour, not one of each.** A lidar reports a ray it could not trust
+ * as zero, as infinity or as not-a-number, and a range below zero is no distance
+ * at all either. Each is a separate encoding of the same thing, and either layer
+ * could stop recognising one of them while still recognising the rest, so each is
+ * a case here rather than one standing in for all four. The length rule gets the
+ * boundary itself, one ray short of what the matcher asks for, rather than a scan
+ * so short that a rule off by one would still refuse it.
+ * The scan neither layer may refuse is
+ * `AScanTheSeamHasNoBusinessRefusingIsRefusedByNeitherLayer`, which is the same
+ * seam approached from inside.
+ */
+TEST_P(ScanRefusalSeam, AScanRefusedHereIsRefusedByTheMatcherForTheSameThing)
+{
+  const SeamCase seam = GetParam();
+
+  const GridFixture fixture = readGrid("pillar_room_grid_coarse.csv");
+  const std::shared_ptr<const OccupancyGridMap> map = mapOf(fixture);
+  ASSERT_NE(map, nullptr);
+
+  const std::vector<Pose> room_poses = readTruth(kTruthFixture);
+  ASSERT_FALSE(room_poses.empty())
+    << "the truth fixture " << kTruthFixture << " named no pose, so there is "
+    << "no free pose to hand the matcher.";
+
+  const Pose truth = worldFromRoom(*map, fixture.origin_yaw, room_poses[0]);
+  ASSERT_TRUE(map->isFree(truth.x, truth.y))
+    << "the estimate handed to the matcher must stand on free space, or it "
+    << "refuses for that instead and the case measures the wrong rule.";
+
+  const Parameters parameters = parametersOf(kTopK);
+
+  const Corrector corrector(parameters.matcher, map);
+  const Localiser localiser(parameters, map, freeSpaceOfMap(*map));
+
+  const std::vector<double> ranges(seam.rays, seam.range);
+
+  const std::expected<Result, Error> library =
+    localiser.localise(ranges, kRangeMax);
+
+  ASSERT_FALSE(library.has_value())
+    << "a scan of " << seam.rays << " rays, each of them " << seam.range
+    << ", is one this library is required to refuse before a hypothesis is "
+    << "drawn, and it produced an answer instead.";
+
+  EXPECT_EQ(library.error().reason, seam.library)
+    << "the " << seam.label << " scan was refused for another of this library's "
+    << "reasons than the one it is about, so a host reading the sentence is "
+    << "sent to look at the wrong thing.";
+
+  const std::expected<fsm_localisation::CorrectionResult, CorrectionError>
+    matcher = corrector.correct(ranges, truth, kRangeMax);
+
+  ASSERT_FALSE(matcher.has_value())
+    << "this library refuses the " << seam.label << " scan of " << seam.rays
+    << " rays and the matcher accepted it. The two no longer mean the same thing "
+    << "by the rule, and the earlier of the two checks is now guessing on the "
+    << "matcher's behalf.";
+
+  EXPECT_EQ(matcher.error(), seam.matcher)
+    << "the matcher refused the same scan for a different reason of its own, so "
+    << "what this library reports about the " << seam.label << " scan is no "
+    << "longer what the matcher would have called it.";
+}
+
 INSTANTIATE_TEST_SUITE_P(
   AtFiveCentimetreCells, LocaliserOnAFineGrid,
   testing::ValuesIn(kFineGrids), gridCaseSuffix);
+
+INSTANTIATE_TEST_SUITE_P(
+  OverEveryFlavourTheSeamDecides, ScanRefusalSeam,
+  testing::ValuesIn(kSeamCases), seamCaseSuffix);
 
 INSTANTIATE_TEST_SUITE_P(
   OverEveryGrid, LocaliserOnEveryGrid,

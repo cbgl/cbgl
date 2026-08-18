@@ -154,6 +154,10 @@ if(BUILD_TESTING)
     ENV ROS_DOMAIN_ID=86
     APPEND_ENV PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/test)
 
+  add_launch_test(test/test_scan_qos.py TIMEOUT 300
+    ENV ROS_DOMAIN_ID=87
+    APPEND_ENV PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/test)
+
   foreach(test_target test_cbgl_caer test_cbgl_dispersal test_cbgl_parameters)
     if(TARGET ${test_target})
       target_link_libraries(${test_target} cbgl_core_exact)

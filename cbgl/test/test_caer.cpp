@@ -20,7 +20,7 @@
 
 /**
  * @brief `cbgl::caer`: the metric every ranking in this algorithm is decided
- * by, and the three things about it that are easy to get wrong.
+ * by, and the four things about it that are easy to get wrong.
  * @details
  * The metric is the cumulative absolute error per ray between a measurement
  * and a cast: the absolute difference between the two, summed over the rays
@@ -42,6 +42,11 @@
  * is the case that says so, by holding two casts that disagree by the same
  * amount on every contributing ray against each other and requiring the one
  * with twice as many contributing rays to score twice as much.
+ * **It is compared over the rays the two spans share.** The ROS 1 build looped
+ * over both to a length neither was known to have. The cast and the measurement
+ * are the same length by construction in a run, but the metric is a public
+ * function and a caller may hand it any two spans, so taking the shorter of the
+ * two is what keeps that safe.
  * Every expected value below is written out as the arithmetic that produces
  * it, in the case that uses it, so that a reader can add the terms up by hand
  * rather than trust a number.
@@ -50,6 +55,8 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <limits>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -134,6 +141,47 @@ TEST(Caer, ACastThatAgreesEverywhereScoresNothing)
     << "a search over a map the measurement was cast from should approach, so "
     << "a metric that could not reach zero would have no floor to rank "
     << "against.";
+}
+
+/**
+ * @brief A measurement and a cast of different lengths are compared over the
+ * rays they share, and neither is read past its own end.
+ * @details The ROS 1 build looped over both vectors to a length neither of them
+ * was known to have, so a cast shorter than the measurement was read past its
+ * end. The two are the same length by construction here, the cast being taken
+ * at the measurement's own ray count, but the metric is a public function and a
+ * caller may hand it any two spans. Comparing over the shorter of the two is
+ * what makes that safe, and it is what this case pins.
+ */
+TEST(Caer, AMeasurementAndACastOfDifferentLengthsAreComparedOverTheShorter)
+{
+  const std::vector<double> measured{2.0, 4.0, 6.0, 8.0};
+  const std::vector<double> short_cast{2.5, 3.0};
+
+  const double over_the_shared_rays =
+    std::abs(2.5 - 2.0) + std::abs(3.0 - 4.0);
+
+  EXPECT_EQ(cbgl::caer(measured, short_cast, kRangeMax), over_the_shared_rays)
+    << "the cast carries " << short_cast.size() << " rays against the "
+    << "measurement's " << measured.size() << ", so only the first "
+    << short_cast.size() << " can be compared and the score is "
+    << over_the_shared_rays << ". Reading to the measurement's length instead "
+    << "would walk off the end of the cast, which is the defect this replaces.";
+
+  EXPECT_EQ(cbgl::caer(short_cast, measured, kRangeMax), over_the_shared_rays)
+    << "the same two spans the other way round share the same rays, so they "
+    << "must score the same. A metric that took its ray count from whichever "
+    << "span came first would disagree with itself here.";
+
+  EXPECT_EQ(cbgl::caer(measured, std::span<const double>{}, kRangeMax),
+    std::numeric_limits<double>::infinity())
+    << "a cast of no rays at all shares no contributing ray with the "
+    << "measurement, so it ranks behind every cast that scored anything.";
+
+  EXPECT_EQ(cbgl::caer(std::span<const double>{}, measured, kRangeMax),
+    std::numeric_limits<double>::infinity())
+    << "a measurement of no rays at all contributes nothing either, and the "
+    << "same reasoning applies to it.";
 }
 
 TEST(Caer, EveryContributingRayAddsItsOwnAbsoluteDifference)
