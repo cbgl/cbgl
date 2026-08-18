@@ -27,7 +27,6 @@ find_package(nav_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
-find_package(tf2_geometry_msgs REQUIRED)
 
 add_library(cbgl_core SHARED
   src/cbgl/cbgl.cpp)
@@ -58,7 +57,6 @@ target_link_libraries(cbgl_interface PUBLIC
   rclcpp::rclcpp
   tf2::tf2
   tf2_ros::tf2_ros
-  tf2_geometry_msgs::tf2_geometry_msgs
   ${sensor_msgs_TARGETS}
   ${geometry_msgs_TARGETS}
   ${nav_msgs_TARGETS}
@@ -75,30 +73,7 @@ if(BUILD_TESTING)
   set(ament_cmake_uncrustify_FOUND TRUE)
   set(ament_cmake_cpplint_FOUND TRUE)
 
-  # The vendored casting, the particle filter, the second ray tracer and the
-  # ROS 1 node are not this package's code to hold to its own conventions, and
-  # they are on their way out of it. The exclusion below leaves with them. It
-  # names the files one by one because a linter excludes a path it can match
-  # against a file it found, and a directory matches nothing.
-  file(GLOB_RECURSE cbgl_unlinted
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/cbgl_node/*
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/utils/*
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/cbgl_node/*
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/utils/*)
-
-  set(AMENT_LINT_AUTO_FILE_EXCLUDE ${cbgl_unlinted})
-
-  # Two of the linters take no exclusion and walk the whole package instead, so
-  # their automatic pass is held back and each is pointed at this package's own
-  # files. Neither is switched off: the vendored trees' own CMake and the two
-  # plotting scripts that came with the vendored casting are simply not what
-  # this package is linted on.
-  set(AMENT_LINT_AUTO_EXCLUDE ament_cmake_lint_cmake ament_cmake_pep257)
-
   ament_lint_auto_find_test_dependencies()
-
-  ament_lint_cmake(CMakeLists.txt cmake)
-  ament_pep257(test)
 
   find_package(ament_cmake_gtest REQUIRED)
 
@@ -139,6 +114,13 @@ if(BUILD_TESTING)
   target_compile_definitions(test_cbgl_localiser PRIVATE
     CBGL_TEST_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures")
 
+  ament_add_gtest(test_cbgl_node_params
+    test/test_node_params.cpp
+    ENV ROS_DOMAIN_ID=81)
+  target_link_libraries(test_cbgl_node_params cbgl_interface)
+  target_compile_definitions(test_cbgl_node_params PRIVATE
+    CBGL_README="${CMAKE_CURRENT_SOURCE_DIR}/../README.md")
+
   ament_add_gtest(test_cbgl_parameters
     test/test_parameters.cpp)
 
@@ -149,6 +131,28 @@ if(BUILD_TESTING)
   ament_add_gtest(test_cbgl_sift
     test/test_sift.cpp
     TIMEOUT 300)
+
+  find_package(launch_testing_ament_cmake REQUIRED)
+
+  add_launch_test(test/test_node_behaviour.py TIMEOUT 400
+    ENV ROS_DOMAIN_ID=82
+    APPEND_ENV PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/test)
+
+  add_launch_test(test/test_node_startup.py TIMEOUT 300
+    ENV ROS_DOMAIN_ID=83
+    APPEND_ENV PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/test)
+
+  add_launch_test(test/test_optional_topics.py TIMEOUT 400
+    ENV ROS_DOMAIN_ID=84
+    APPEND_ENV PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/test)
+
+  add_launch_test(test/test_refusals.py TIMEOUT 600
+    ENV ROS_DOMAIN_ID=85
+    APPEND_ENV PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/test)
+
+  add_launch_test(test/test_refuses_to_start.py TIMEOUT 300
+    ENV ROS_DOMAIN_ID=86
+    APPEND_ENV PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/test)
 
   foreach(test_target test_cbgl_caer test_cbgl_dispersal test_cbgl_parameters)
     if(TARGET ${test_target})
@@ -182,6 +186,9 @@ install(TARGETS
 install(DIRECTORY include/cbgl
   DESTINATION include)
 
+install(DIRECTORY launch config
+  DESTINATION share/${PROJECT_NAME})
+
 ament_export_targets(export_cbgl HAS_LIBRARY_TARGET)
 
 ament_export_dependencies(
@@ -192,7 +199,6 @@ ament_export_dependencies(
   nav_msgs
   std_srvs
   tf2
-  tf2_ros
-  tf2_geometry_msgs)
+  tf2_ros)
 
 ament_package(CONFIG_EXTRAS cmake/cbgl-extras.cmake)

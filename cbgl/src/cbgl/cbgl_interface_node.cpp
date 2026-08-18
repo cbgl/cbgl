@@ -26,6 +26,20 @@
 
 #include "cbgl/cbgl_interface.hpp"
 
+/**
+ * @brief Runs the node until it is asked to stop, and reports a refusal to
+ * start.
+ * @details The executor is multi-threaded and takes the framework's own thread
+ * count, which is the number of cores with a floor of two. Two is what the
+ * service contract needs: one thread carries a run and another answers the
+ * request that arrives while that run lasts, which is what lets the second
+ * request be refused rather than queued. A single threaded executor would
+ * answer it only once the run it was asking about had finished.
+ * A setting outside its range is refused by the constructor, which throws with
+ * the sentence inside `what()`. Catching it here is what turns that into a log
+ * line an operator can read and an exit code a launch can act on, rather than
+ * the abort an uncaught exception leaves.
+ */
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);

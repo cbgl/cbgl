@@ -65,26 +65,47 @@ private:
   void declareParameters();
 
   /**
-   * @brief One localisation, from the map and the scan held at the moment of
-   * the call.
-   * @details The service answers with a success flag and a sentence, and the
-   * sentence says why wherever the answer is no. No pose is published for a
-   * refused run.
+   * @brief The service: one localisation, unless one is already under way.
+   * @details The answer carries a success flag and a sentence, and the sentence
+   * says why wherever the answer is no. No pose is published for a refused run.
    */
   void globalLocalisation(
     const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
     std::shared_ptr<std_srvs::srv::Trigger::Response> response);
 
+  /**
+   * @brief One localisation, from the map and the scan held at the moment it
+   * begins, and every publication that localisation produces.
+   * @details Held apart from the service so that the flag which refuses a
+   * second run is raised and lowered in one place, whichever way a run ends.
+   */
+  void localiseOnce(std_srvs::srv::Trigger::Response& outcome);
+
   void mapCallback(nav_msgs::msg::OccupancyGrid::ConstSharedPtr map);
+
+  /**
+   * @brief Where one frame sits in another, read from the transform tree.
+   * @return the placement, or a sentence naming both frames and saying the tree
+   * does not carry one against the other.
+   */
+  std::expected<Pose, std::string> placementOf(const std::string& frame_id,
+    const std::string& in_frame_id, const rclcpp::Time& stamp) const;
 
   void publishHypotheses(const std::vector<Pose>& hypotheses,
     const rclcpp::Time& stamp);
-  void publishMapScan(const sensor_msgs::msg::LaserScan& scan,
-    const Pose& sensor, const rclcpp::Time& stamp);
+  void publishMapScan(const fsm_localisation::OccupancyGridMap& map,
+    const sensor_msgs::msg::LaserScan& scan, const Pose& sensor,
+    const rclcpp::Time& stamp);
   void publishPose(const Pose& robot, const rclcpp::Time& stamp);
   void publishTopHypotheses(const std::vector<ScoredPose>& survivors,
     const rclcpp::Time& stamp);
-  void publishTransform(const Pose& robot, const rclcpp::Time& stamp);
+  /**
+   * @brief Broadcast the global frame against the odometry frame.
+   * @param odom_in_robot the odometry frame's pose in the robot frame, read
+   * from the tree when the run began rather than when it ended.
+   */
+  void publishTransform(const Pose& robot, const Pose& odom_in_robot,
+    const rclcpp::Time& stamp);
 
   Parameters readParameters();
 
@@ -127,8 +148,10 @@ private:
     fsm_localisation::CastingMethod::ray_marching};
 
   std::string global_frame_id_;
+  std::string map_topic_;
   std::string odom_frame_id_;
   std::string robot_frame_id_;
+  std::string scan_topic_;
 
   double initial_cov_aa_{0.06854};
   double initial_cov_xx_{0.05};
@@ -137,6 +160,13 @@ private:
   bool tf_broadcast_{false};
   rclcpp::Duration tf_lookup_timeout_{0, 0};
 
+  /**
+   * @brief Guards the four members below: the localiser and the map one run
+   * works from, the newest scan, and whether a run is under way.
+   * @remark The last of the four is the least obvious. It is what refuses a
+   * second request rather than queueing it, so a run that ended without
+   * lowering it would refuse every request made afterwards.
+   */
   mutable std::mutex held_mutex_;
   std::shared_ptr<const Localiser> localiser_;
   std::shared_ptr<const fsm_localisation::OccupancyGridMap> map_;

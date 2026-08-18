@@ -4,7 +4,7 @@
   <version>1.0.1</version>
   <description>Global localisation of a 2D lidar sensor in a 2D occupancy grid, under global uncertainty in position and orientation, from a single scan.</description>
   <maintainer email="alefilot@auth.gr">li9i</maintainer>
-  <license>MIT</license>
+  <license file="LICENSE">MIT</license>
 
   <url type="repository">https://github.com/cbgl/cbgl</url>
   <url type="bugtracker">https://github.com/cbgl/cbgl/issues</url>
@@ -19,13 +19,15 @@
   <depend>std_srvs</depend>
   <depend>tf2</depend>
   <depend>tf2_ros</depend>
-  <depend>tf2_geometry_msgs</depend>
+  <depend>libfftw3</depend>
+  <depend>pkg-config</depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
   <test_depend>ament_cmake_gtest</test_depend>
   <test_depend>launch_testing_ament_cmake</test_depend>
-  <test_depend>launch_testing_ros</test_depend>
+  <test_depend>launch_ros</test_depend>
+  <test_depend>rclpy</test_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

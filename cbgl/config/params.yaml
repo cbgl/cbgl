@@ -1,0 +1,238 @@
+#______________________________________________________________________________
+# Global localisation of a 2D lidar in an occupancy grid, from a single scan,
+# under global uncertainty in position and orientation. A map and one scan are
+# both needed, and nothing at all happens until the service is called.
+#
+# Launch it with
+#
+#   ros2 launch cbgl cbgl.launch.xml
+#
+# and ask for an answer with
+#
+#   ros2 service call /cbgl/global_localisation std_srvs/srv/Trigger
+#
+# The call returns when the localisation is done, which can be seconds later,
+# and it carries the outcome. A second call arriving while one is under way is
+# refused rather than queued.
+#
+# The key below is the wildcard rather than a node name, so this file applies
+# whatever the node is called and renaming the node cannot silently drop every
+# setting in it.
+#______________________________________________________________________________
+/**:
+  ros__parameters:
+
+    # --------------------------------------------------------------------------
+    # IO topics
+    # --------------------------------------------------------------------------
+    # 2d panoramic scans are read here. The newest one is held until the service
+    # asks for it; a scan on its own causes nothing to happen. A sensor that
+    # does not see all the way round is not supported.
+    scan_topic: "/scan"
+
+    # The map to localise in. Subscribed with transient local durability and a
+    # depth of one, so a map latched before this node started is delivered on
+    # subscription rather than waited for. A second map replaces the first; a
+    # run already under way finishes against the map it started with.
+    map_topic: "/map"
+
+    # Where the answer is published, as a pose of the robot rather than of the
+    # sensor, in global_frame_id, stamped from the scan it was computed from.
+    # The default is where amcl reads a pose to be seeded with.
+    output_pose_topic: "/initialpose"
+
+    # --------------------------------------------------------------------------
+    # Optional topics, for looking at
+    # --------------------------------------------------------------------------
+    # Three publications of no use to a robot and of great use to somebody
+    # working out why an answer was what it was. Each is off while its name is
+    # empty, and each costs bandwidth and the drawing of a message once it is
+    # named.
+    #
+    # The whole dispersed set, every hypothesis the search started from.
+    hypotheses_topic: ""
+
+    # The survivors of the sift, in ranking order, which are the poses the
+    # refinement was handed. They cluster where the room repeats itself.
+    top_hypotheses_topic: ""
+
+    # The scan the answer would see, cast from the map, for laying over the scan
+    # the sensor did see. Costs one extra cast per run.
+    map_scan_topic: ""
+
+    # --------------------------------------------------------------------------
+    # Frames
+    # --------------------------------------------------------------------------
+    # The frame the map and the published answer are expressed in. Frame names
+    # carry no leading slash; tf2 rejects one.
+    global_frame_id: "map"
+
+    # The robot's own frame, which is what the published pose places. The node
+    # works out where the sensor sits on the robot by looking up this frame
+    # against the scan's own, so that transform must exist in the tree or every
+    # run is refused for want of it. The sensor's frame is read off the scan
+    # message rather than named here, so that nothing has to be told twice what
+    # the scan already says.
+    robot_frame_id: "base_footprint"
+
+    # The odometry frame, read only when broadcasting.
+    odom_frame_id: "odom"
+
+    # Broadcast global_frame_id <- odom_frame_id for each answer, which is what
+    # places the answer in a tree that already carries an odometry frame. It is
+    # the robot's pose in the global frame composed with the odometry frame's
+    # pose in the robot frame, and the second half is read from the tree at the
+    # scan's own stamp.
+    #
+    # This writes into somebody else's transform tree, so the node's own default
+    # is false and this file, which is what the ROS 1 package shipped, turns it
+    # on. Turn it off where another node is already the parent of the odometry
+    # frame, and read the answer off output_pose_topic instead.
+    tf_broadcast: true
+
+    # How long to wait for a transform to appear in the tree before giving up on
+    # one run. Seconds. A run whose sensor placement is not there is refused and
+    # says so.
+    tf_lookup_timeout: 0.1
+
+    # --------------------------------------------------------------------------
+    # Map
+    # --------------------------------------------------------------------------
+    # Which algorithm casts a ray into the map: "ray_marching", "bresenham" or
+    # "cddt". One is built per map, not three.
+    #
+    # "ray_marching" walks the true line and is what this package ships.
+    # "bresenham" walks a lattice approximation of it, which costs accuracy on a
+    # ray meeting a wall at a shallow angle. "cddt" precomputes a table, which
+    # costs time and memory when a map arrives and quantises the cast heading to
+    # half a degree thereafter, which at thirty metres is worse than a five
+    # centimetre map.
+    map_scan_method: "ray_marching"
+
+    # A cell at or above this is blocked, on the nought to one hundred scale an
+    # occupancy grid states a cell in. A cell no sensor has ever seen blocks a
+    # ray whatever this is set to. Every hypothesis is drawn on a free cell, so
+    # this decides where the search is allowed to look as well as what a cast
+    # ray stops at.
+    occupancy_threshold: 65
+
+    # --------------------------------------------------------------------------
+    # Dispersal and sift
+    # --------------------------------------------------------------------------
+    # How many hypothesis positions are drawn per square metre of the map's free
+    # space, and how many orientations each of those positions is scored at. The
+    # product of the two and the free area is how many candidates the sift
+    # scores, so both buy the chance of an answer with execution time. The
+    # number of hypotheses is proportional to the free area, so a large building
+    # at this density draws hundreds of thousands of candidates.
+    dl: 15.0
+    da: 32
+
+    # How many of the scored candidates are refined by scan matching. The
+    # refinement is what turns a candidate into an answer, and it is the
+    # expensive half of a run, so this is the first setting to lower where a run
+    # takes too long. Where the map offers fewer candidates than this asks for,
+    # every candidate is refined and the node says so.
+    top_k_caers: 10
+
+    # 0 draws the hypotheses from hardware entropy, which is what a robot wants.
+    # Any other value pins both the draw and the matcher's recovery search, so
+    # that a run can be repeated exactly.
+    rng_seed: 0
+
+    # How many threads the sift is split over. 0 uses as many as the hardware
+    # offers. The ranking and the answer do not depend on this: the same input
+    # gives the same answer at one thread and at all of them.
+    num_threads: 0
+
+    # --------------------------------------------------------------------------
+    # Matcher
+    # --------------------------------------------------------------------------
+    # The settings of the scan matching that refines each survivor of the sift.
+    # They are handed through to fsm_localisation and are refused by that
+    # package's own validator.
+    #
+    # How many rays a scan is reduced to, once, before the sift. The same
+    # reduced scan is what the sift, the refinement and the selection all work
+    # from, and the cast from the map is taken at the same length. 0 uses every
+    # ray the scan carries. A scan carrying fewer rays than this is refused.
+    # Execution time rises faster than the ray count does.
+    size_scan: 360
+
+    # Base angular oversampling, and the maximum it may reach. Larger values buy
+    # accuracy with execution time.
+    min_magnification_size: 0
+    max_magnification_size: 3
+
+    # Greater displacement between a survivor and the truth requires higher
+    # values.
+    num_iterations: 3
+
+    # Axis-wise and angular radii for generating a new initial estimate when a
+    # match goes badly and a recovery is attempted. These also bound how far
+    # from a survivor its refinement will look. A survivor of the sift stands at
+    # the centre of a cell and can be a cell or more from the truth, which is
+    # why this is wider here than the matcher's own default of 0.2.
+    xy_bound: 1.2
+    t_bound:  0.786
+
+    # Lower values decrease execution time.
+    max_counter:    200
+    max_recoveries: 10
+
+    # How each ray of a scan is matched to the wall it meets.
+    #
+    # "angular" offers each wall only to the rays that can reach it. It returns
+    # the nearest wall in front of every ray whatever shape the room is, and its
+    # execution time rises in step with size_scan.
+    #
+    # "windowed" narrows the search for each ray to the neighbourhood of the
+    # wall the previous ray met. It is what this algorithm shipped with, and it
+    # is kept so that a run can be compared against results published before
+    # "angular" existed. Its execution time rises with the square of size_scan,
+    # and where a room turns back on itself it can return a wall standing behind
+    # the nearest one.
+    ray_search: "angular"
+
+    # Three behaviours that are unconditional in the matcher this algorithm
+    # shipped with, and optional in the one it now borrows. All three are on
+    # here, because leaving them off would be refining with a different matcher
+    # and calling it the same one.
+
+    # Once the rotation criterion passes 0.99999, jump straight to the maximum
+    # angular oversampling instead of climbing to it. Fires at most once per
+    # match. Buys time on a match that is already going well.
+    enforce_early_gearup: true
+
+    # The translation stage abandons a candidate whose position has moved more
+    # than xy_bound + 0.01 on either axis from where the stage started, and
+    # treats it as a failure. Keeps a refinement from wandering off the map, at
+    # the cost of giving up on one that would have come good.
+    enforce_translation_bound: true
+
+    # When every candidate angle fails its trial translation, start a recovery
+    # rather than carry on with the angle of a candidate that failed. Reaches
+    # the recovery path more often, so rng_seed governs whether two runs over
+    # the same input agree exactly.
+    recover_on_failed_sift: true
+
+    # --------------------------------------------------------------------------
+    # Covariance
+    # --------------------------------------------------------------------------
+    # What the answer is published with. These are not measured and they are not
+    # an estimate of this package's own uncertainty. They are what a consumer
+    # such as amcl is seeded with, and they are published exactly as they are
+    # set here.
+    initial_cov_xx: 0.05
+    initial_cov_yy: 0.05
+    initial_cov_aa: 0.06854
+
+    # --------------------------------------------------------------------------
+    # Node behaviour
+    # --------------------------------------------------------------------------
+    # "reliable" mirrors what ROS 1 did. Sensor drivers commonly publish
+    # "best_effort", and a subscription that does not match its publisher
+    # receives nothing at all. A depth of one is enough: one scan is all a run
+    # uses, and the newest is the one it wants.
+    scan_qos_reliability: "reliable"
+    scan_qos_depth:       1

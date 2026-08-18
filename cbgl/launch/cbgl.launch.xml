@@ -1,0 +1,28 @@
+<launch>
+  <!--
+    One node, one parameter file, one launch file. Launching puts the node in
+    stand-by: it holds the newest map and the newest scan and computes nothing
+    at all until its service is called.
+
+      ros2 launch cbgl cbgl.launch.xml
+      ros2 service call /cbgl/global_localisation std_srvs/srv/Trigger
+
+    The service is node relative, so it follows node_name. Two nodes may not
+    share a name, which is what node_name is for, and a second node is this
+    same file launched again with a name and a parameter file of its own.
+  -->
+  <let name="pkg_name"  value="cbgl"/>
+  <arg name="namespace" default="/"/>
+  <arg name="node_name" default="cbgl"/>
+  <arg name="params"    default="$(find-pkg-share cbgl)/config/params.yaml"/>
+  <!-- ===================================================================== -->
+  <node pkg="$(var pkg_name)"
+        exec="$(var pkg_name)_interface_node"
+        name="$(var node_name)"
+        namespace="$(var namespace)"
+        output="screen"
+  >
+    <param from="$(var params)"/>
+  </node>
+  <!-- ===================================================================== -->
+</launch>

@@ -1,9 +1,0 @@
-# size_scan <= ranges.size() (meaning you can downsample with this param)
-size_scan:              360
-min_magnification_size: 0
-max_magnification_size: 3
-num_iterations:         3
-xy_bound:               1.2
-t_bound:                0.786
-max_counter:            200
-max_recoveries:         10
