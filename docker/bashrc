@@ -1,0 +1,2 @@
+[ -f ~/.bashrc_base ] && source ~/.bashrc_base
+[ -f ~/.bashrc_ros2 ] && source ~/.bashrc_ros2

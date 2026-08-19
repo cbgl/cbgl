@@ -1,16 +1,16 @@
 services:
   cbgl:
+
     build:
-      context: ..
-      dockerfile: docker/Dockerfile
+      context: ../..
+      dockerfile: cbgl/docker/Dockerfile
 
-    image: li9i/cbgl:latest
+    image: cbgl:lyrical
     container_name: cbgl
-
-    stdin_open: true
     tty: true
     network_mode: "host"
     ipc: host
-    user: cbgl
+
     volumes:
-      - ../cbgl:/home/cbgl/catkin_ws/src/cbgl/:rw
+      - ./shared-input:/home/cbgl/shared-input:rw
+      - ./shared-output:/home/cbgl/shared-output:rw

@@ -1,0 +1,33 @@
+[ -z "$PS1" ] && return
+
+HISTCONTROL=ignoredups:erasedups
+HISTSIZE=100000
+HISTFILESIZE=100000
+shopt -s histappend
+shopt -s checkwinsize
+
+if [ -f /etc/bash_completion ] && ! shopt -oq posix; then
+  source /etc/bash_completion
+fi
+
+if [ -f /etc/bash_completion.d/git-prompt ]; then
+  source /etc/bash_completion.d/git-prompt
+fi
+
+export GIT_PS1_SHOWDIRTYSTATE=1
+
+if type -t __git_ps1 > /dev/null; then
+  PS1='\[\033[0;94m\]\u@\h\[\033[0m\]:\[\033[0;32m\]\w\[\033[0;35m\]$(__git_ps1 " (%s)")\[\033[0m\]\$ '
+else
+  PS1='\[\033[0;94m\]\u@\h\[\033[0m\]:\[\033[0;32m\]\w\[\033[0m\]\$ '
+fi
+
+if [ -x /usr/bin/dircolors ]; then
+  eval "$(dircolors -b)"
+  alias ls='ls --color=auto'
+  alias grep='grep --color=auto'
+fi
+
+alias ll='ls -alF'
+alias la='ls -A'
+alias l='ls -CF'

@@ -1,0 +1,150 @@
+source /opt/ros/lyrical/setup.bash
+
+if [ -f "${HOME}/ros2_ws/install/local_setup.bash" ]; then
+  source "${HOME}/ros2_ws/install/local_setup.bash"
+else
+  echo "no workspace at ${HOME}/ros2_ws/install: nothing in it is on the path" >&2
+fi
+
+export RCUTILS_COLORIZED_OUTPUT=1
+
+export RCUTILS_CONSOLE_OUTPUT_FORMAT="[{severity} {time}][{name}]: {message} ({function_name}() at {file_name}:{line_number})"
+source /usr/share/colcon_argcomplete/hook/colcon-argcomplete.bash
+eval "$(register-python-argcomplete ros2)"
+eval "$(register-python-argcomplete colcon)"
+
+source /etc/profile.d/colcon_cd.sh
+export _colcon_cd_root=/opt/ros/lyrical/
+alias roscd='colcon_cd'
+function colcon_build()
+{
+  function usage() {
+    echo "Usage:"
+    echo "  colcon_build [--ws <workspace_path>] (--all | --packages-select <pkg1> [<pkg2> ...])"
+    echo "  colcon_build -h | --help"
+    echo
+    echo "Options:"
+    echo "  --ws <workspace_path>     Path to the ROS 2 workspace (default: ~/ros2_ws)"
+    echo "  --all                     Build all packages in the workspace"
+    echo "  --packages-select <pkgs>  Build only the specified packages"
+    echo "  -h, --help                Show this help message"
+  }
+
+  local ws_dir=~/ros2_ws
+  local build_all=false
+  local packages=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --ws)
+        shift
+        ws_dir="$1"
+        ;;
+      --all)
+        build_all=true
+        ;;
+      --packages-select)
+        shift
+        while [[ $# -gt 0 && ! "$1" =~ ^-- ]]; do
+          packages+=("$1")
+          shift
+        done
+        continue
+        ;;
+      -h|--help)
+        usage
+        return 0
+        ;;
+      *)
+        echo "Unknown argument: $1"
+        usage
+        return 1
+        ;;
+    esac
+    shift
+  done
+
+  local dir=$PWD
+
+  cd "$ws_dir" || { echo "Workspace directory not found: $ws_dir"; return 1; }
+
+  if $build_all; then
+    colcon build
+  elif [[ ${#packages[@]} -gt 0 ]]; then
+    colcon build --packages-select "${packages[@]}"
+  else
+    echo "Error: No build target specified. Use --all or --packages-select."
+    usage
+    return 1
+  fi
+
+  source /opt/ros/lyrical/setup.bash
+  source "$ws_dir/install/local_setup.bash"
+
+  cd "$dir" || return
+}
+function colcon_clean()
+{
+  function usage() {
+    echo "Usage:"
+    echo "  colcon_clean [--ws <workspace_path>] (--all | --packages-select <pkg1> [<pkg2> ...])"
+    echo "  colcon_clean -h | --help"
+    echo
+    echo "Options:"
+    echo "  --ws <workspace_path>     Path to the ROS 2 workspace (default: ~/ros2_ws)"
+    echo "  --all                     Clean entire workspace"
+    echo "  --packages-select <pkgs>  Clean only the specified packages"
+    echo "  -h, --help                Show this help message"
+  }
+
+  local ws_dir=~/ros2_ws
+  local clean_all=false
+  local packages=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --ws)
+        shift
+        ws_dir="$1"
+        ;;
+      --all)
+        clean_all=true
+        ;;
+      --packages-select)
+        shift
+        while [[ $# -gt 0 && ! "$1" =~ ^-- ]]; do
+          packages+=("$1")
+          shift
+        done
+        continue
+        ;;
+      -h|--help)
+        usage
+        return 0
+        ;;
+      *)
+        echo "Unknown argument: $1"
+        usage
+        return 1
+        ;;
+    esac
+    shift
+  done
+
+  local dir=$PWD
+
+  cd "$ws_dir" || { echo "Workspace directory not found: $ws_dir"; return 1; }
+
+  if $clean_all; then
+    colcon clean workspace
+  elif [[ ${#packages[@]} -gt 0 ]]; then
+    colcon clean packages --packages-select "${packages[@]}"
+  else
+    echo "Error: No clean target specified. Use --all or --packages-select."
+    usage
+    cd "$dir" || return
+    return 1
+  fi
+
+  cd "$dir" || return
+}
