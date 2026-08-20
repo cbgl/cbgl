@@ -335,6 +335,12 @@ These figures come from that one small room and from nothing larger. The number 
 
 The ROS 1 Kinetic package is on `kinetic-devel` and is unchanged. This version is not a drop-in replacement.
 
+**Before you go back to that branch to check a behaviour, know that it cannot localise as it ships.** With the `map_scan_method` its own configuration file selects, the caster it casts every ray into is built by a constructor that is handed a bare pixel buffer carrying no dimensions and assigns neither the width nor the height it then bounds its loops by, so it cannot build a grid corresponding to the map. The other route into that constructor, from a file, is worse: it reads the dimensions correctly and then discards the object that would have held the grid. The alternative scanner the same parameter offers does not use that code at all and works, so the branch ships misconfigured rather than incapable, and the difference is one value in one file.
+
+Two commits of 1 and 2 July 2024 put it there and it has had no working configured map path since. The commit before them, `fb9dab1` of 15 May 2024, is the last state that runs, and its own sources had stood unchanged for 208 days by then. Its caster is byte identical to the code the published experiments were run with. If you need the old behaviour for comparison, that is the commit to use.
+
+A second fault is independent of the configuration: the map callback declares a stack array of four bytes per cell, so any building-sized map at a normal resolution overflows an ordinary stack before the node does anything at all.
+
 **Renamed or moved**
 
 | ROS 1 | ROS 2 |
@@ -365,9 +371,9 @@ The ROS 1 Kinetic package is on `kinetic-devel` and is unchanged. This version i
 * **The refinement matches against the map.** The ROS 1 version's scan matching path matched each survivor against one scan manufactured at that survivor's own pose. This one casts into the map at every pose it tries. This is the largest behavioural difference in the port and the one most likely to move the accuracy figures.
 * **`tf_broadcast: false` works.** In the ROS 1 version, turning broadcasting off meant the sensor's placement on the robot was never looked up, and every cast composed the robot pose with an uninitialised transform, so the published pose was arbitrary. Here the placement is read on every run whether broadcasting is on or off, which is why the node's own default for `tf_broadcast` can be false.
 * **A rotated cast is labelled with the orientation the rotation actually amounts to.** The ROS 1 version shifted the range vector by one number of samples and labelled the result with a different angle, drifting to nearly eight degrees by the last candidate and in the opposite direction, so the refinement started from a pose that disagreed with the scan it was chosen for.
-* **Hypotheses are drawn on free cells.** The ROS 1 version computed sampling bounds that inverted the map's origin, drawing from the wrong region for a map whose centre is not the world origin, and collapsing to a single point for one whose recomputed centre landed on zero.
+* **Hypotheses are drawn on free cells.** The ROS 1 version computed sampling bounds that swapped the map's centre for its half extent. For a map message origin at zero, which is where a map server usually puts it, the two arithmetics agree and the defect is latent. For an origin away from zero they diverge, and for a map centred on the world origin, which is what a mapping run started at the origin produces, the interval collapses to a single point the rejection loop spins on without returning. Dispersal by free cell removes the arithmetic entirely.
 * **The poses drawn are sensor poses.** The ROS 1 version dispersed robot poses over free cells and offset to the sensor afterwards, which can place the sensor, which is what casts, on a blocked cell.
-* **No pose is published when a run fails.** The ROS 1 version published one regardless, reading its winner from index minus one when every candidate had been refused.
+* **No pose is published when a run fails.** The ROS 1 version published one regardless, reading its winner from index minus one. It never refused a candidate, scoring every one unconditionally; the index stayed at minus one when the survivor list was empty, which `top_k_caers` at zero produces.
 * **The published pose is stamped from the scan** that produced it, not from the wall clock, and its frame is `global_frame_id` rather than the hardcoded string `/map`.
 * **A parameter outside its range refuses to start.** The node says which setting and which value, and exits with 1.
 

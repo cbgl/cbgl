@@ -40,16 +40,19 @@ Forthcoming
   been chosen for.
 * Draws hypothesis positions by choosing a free cell uniformly, so every draw is
   on free space by construction. The Kinetic version computed its sampling bounds
-  as ``size * scale / 2 -+ origin`` where it meant ``origin -+ size * scale / 2``,
-  which draws from the wrong region for a map whose centre is not the world
-  origin and collapses to a single point for one whose recomputed centre lands on
-  zero.
+  as ``size * scale / 2 -+ origin`` where it meant ``origin -+ size * scale / 2``.
+  The two agree whenever the map message origin is zero, which is where a map
+  server usually puts it, so the defect is latent there. They diverge for an
+  origin away from zero, and for a map centred on the world origin the interval
+  collapses to a single point the rejection loop spins on without returning.
 * Disperses sensor poses rather than robot poses. The Kinetic version dispersed
   robot poses over free cells and offset to the sensor afterwards, which can
   place the sensor, which is what casts, on a blocked cell.
 * Publishes no pose when a run cannot produce one, and reports why. The Kinetic
-  version read its winner from index minus one when every candidate had been
-  refused and published from it.
+  version read its winner from index minus one and published from it. It never
+  refused a candidate, scoring every one unconditionally; the index stayed at
+  minus one when the survivor list was empty, which ``top_k_caers`` at zero
+  produces.
 * Bounds the partial sort by the candidate count. The Kinetic version called
   ``nth_element`` past the end of its own index vector and then read past it.
 * Bounds every other read by what the vector it reads actually carries. The

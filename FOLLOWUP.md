@@ -32,7 +32,7 @@ The guard is kept because a localiser is constructed around a grid reference rat
 
 ### Hypotheses are drawn at cell centres
 
-A drawn position is the centre of a free cell. On a map of twenty centimetre cells that is up to fourteen centimetres of error in the pose the refinement starts from, which the refinement has to absorb. Drawing uniformly within the chosen cell instead is a three line change that does not touch the interface, and it is the first thing to try if a comparison ever shows the sift picking worse survivors than a continuous draw would.
+A drawn position is the centre of a free cell. On a map of twenty centimetre cells that is up to fourteen centimetres of error in the pose the refinement starts from, which the refinement has to absorb. Drawing uniformly within the chosen cell instead is a three line change that does not touch the interface. It has now been measured and it is not needed: holding the build and the maps fixed and changing only the draw, the cell centre set was equal or slightly better in all seven pairs measured, and jittering each hypothesis inside its own cell moves the distance to the nearest hypothesis by a few millimetres either way. At the shipped density the spacing between hypotheses is about 0.26 m, which dwarfs a quantisation of at most 0.141 m.
 
 ## What the sensor has to be
 
@@ -72,11 +72,11 @@ Neither the algorithm's validator nor the matcher's has a rule for either. The n
 
 ### Three of the ROS 1 defects have no counterpart to test
 
-The version this port replaces carried thirteen defects, of which ten are guarded by a named test that would catch a regression. The other three were removed by deleting the code that held them, so there is nothing left to test: a variable length array on the stack in the PNG conversion, a read before the start of an empty region list in the scan interpolation, and two allocations that were never freed. All three went with the PNG round trip, the interpolation routine and the vendored particle filter respectively.
+The version this port replaces carried at least fifteen defects. Thirteen were found by reading it against its own documentation, of which ten are guarded by a named test that would catch a regression. Two more were found later, while its hypothesis dispersal was being measured: a dropped map origin orientation, and a grid cast that never subtracts the map origin at all. Both are demonstrated in the sibling repository and neither has a counterpart here, the arithmetic they live in having gone with the code. The other three were removed by deleting the code that held them, so there is nothing left to test: a variable length array on the stack in the PNG conversion, a read before the start of an empty region list in the scan interpolation, and two allocations that were never freed. All three went with the PNG round trip, the interpolation routine and the vendored particle filter respectively.
 
 ### The linter pass is thinner than its count suggests
 
-Six linters run and all six pass, but only three examine anything of this package. `cppcheck` skips itself entirely on the current image for upstream performance reasons, and skips `fsm_localisation` identically. `uncrustify` and `cpplint` are switched off exactly as `fsm_localisation` switches them off, which is a gap rather than a decision: the house style is enforced at review rather than by a tool.
+Six linters run and all six pass, but of them only five examine anything of this package and one skips itself. `cppcheck` skips itself entirely on the current image for upstream performance reasons, all fifteen of its cases, and skips `fsm_localisation` identically. `uncrustify` and `cpplint` are not among the six at all: they are switched off exactly as `fsm_localisation` switches them off, which is a gap rather than a decision: the house style is enforced at review rather than by a tool.
 
 ### Concurrency was established rather than assumed, and the arrangement rests on a compile-time guarantee
 
@@ -100,18 +100,18 @@ CGAL's own configuration hook emits a notice about the build type being empty. R
 
 Neither does the rest of this family. There is therefore nothing for a pre-commit pass to run, and the absence is recorded here rather than being skipped silently at every commit. Adding one would be a change to how the family works rather than to this package.
 
-## Three questions the comparison against the ROS 1 build has still to settle
+## What the comparison against the ROS 1 build settled, and the one thing it did not
 
-That comparison lives in a sibling repository, `cbgl-tests`, laid out beside this one so that recordings, containers and build outputs never weigh down a clone of the package. **It has not been run at this commit.** The two container definitions and the scenario generator are in place. The drivers, the comparator and the figures they are meant to produce are not. So nothing below is settled by a measurement against the ROS 1 build, and where something has been measured on this build alone the entry says which.
+That comparison lives in a sibling repository, `cbgl-tests`, laid out beside this one so that recordings, containers and build outputs never weigh down a clone of the package. **It has now been run.** Both halves of it, as each build ships and with both handed one hypothesis set, over seven scenario and resolution pairs, 5600 trials, against the ROS 1 build at the last commit that runs. Its figures are in that repository's own results document. Two of the three questions below are answered by it, and so is the cell centre question higher up this file.
 
-### Whether the wider translation bound is still right, which is not answered
+### The wider translation bound is right and stays at 1.2 m
 
-`xy_bound` is shipped at 1.2 m against the matcher's own default of 0.2 m, because a survivor of the sift stands at a cell centre and can be a cell or more from the truth. Whether 1.2 remains right now that the refinement matches against the map rather than against a ring of points frozen at the survivor's own pose has not been measured. It was carried across from the ROS 1 configuration on the strength of the reasoning above and nothing more. If a comparison ever shows the refinement wandering, this is the first parameter to look at.
+`xy_bound` is shipped at 1.2 m against the matcher's own default of 0.2 m, because a survivor of the sift stands at a cell centre and can be a cell or more from the truth. Measured over the 1005 trials that met the bar: the answer sits a median of 0.124 m from the nearest hypothesis it was handed, ninetieth percentile 0.224 m, worst 0.370 m, and 165 of the 1005 are beyond 0.2 m. So a 0.2 m bound would clip about one trial in six. The ROS 1 build needs the same reach, 0.132 m median and 0.364 m worst, so the requirement comes from the shipped hypothesis density rather than from anything this port chose. The refinement is not wandering: all 1005 landed inside the bar.
 
-### Whether refining against the map costs more per survivor, which is half answered
+### Refining against the map costs less per run, by three to eleven times
 
-The ROS 1 refinement cast once per survivor. This one casts at every pose it tries, so a refinement is not obviously cheaper per survivor and the ROS 1 build is what would say. That side has not been run. What has been measured, on this build alone and through the service, is which half of a run the time goes into: ten times as many candidates costs a fifth of a second, where fifty times as many survivors costs three seconds. So within this build `top_k_caers` governs execution time far more than the map's size does. Whether the whole run is faster or slower than the ROS 1 build's is open.
+The ROS 1 refinement cast once per survivor and this one casts at every pose it tries, so a refinement is not obviously cheaper per survivor. The whole run is nonetheless faster: 3.30 to 5.16 times on raw wall clock against the ROS 1 build's matcher path, and 6.09 to 10.35 times against the ICP path it ships by default. Those ratios are an upper bound, the two builds being unable to measure the same interval because the ROS 1 service call disperses and returns rather than localising; crediting it its own self report gives a floor of 3.08 to 5.00. The earlier finding within this build still holds, that `top_k_caers` governs execution time far more than the map's size does.
 
-### Whether the concurrency holds up on a real building, which is not answered
+### Whether the concurrency holds up on a real building is still open
 
-The hypothesis count is proportional to the map's free area, so a large building at the shipped density draws hundreds of thousands of candidates. Every timing figure this package quotes comes from one generated room of about five and a half square metres of free space. Nothing here measures a real building, or anything close to one, and nothing in the readme should be read as claiming otherwise. The mitigating finding is that the sift, which is the part that grows with the map, is the cheap half.
+The hypothesis count is proportional to the map's free area, so a large building at the shipped density draws hundreds of thousands of candidates. The largest map the comparison ran on is a rebuilt real environment of about 202 square metres of free space, which draws about three thousand. That is two orders of magnitude short of the case this entry is about, so nothing here answers it and nothing in the readme should be read as claiming otherwise. The mitigating finding is that the sift, which is the part that grows with the map, is the cheap half.
