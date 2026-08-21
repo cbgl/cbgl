@@ -60,8 +60,14 @@ typedef struct
 // Description for a map
 typedef struct
 {
-  // Map origin; the map is a viewport onto a conceptual larger map.
+  // Map origin; the map is a viewport onto a conceptual larger map. This is
+  // the centre of the viewport, in world coordinates.
   double origin_x, origin_y;
+
+  // Orientation of the map's own axes about z, in world coordinates, with its
+  // sine and cosine held beside it so that the conversion macros below need
+  // not recompute them on every call.
+  double origin_yaw, origin_sin_yaw, origin_cos_yaw;
 
   // Map scale (m/cell)
   double scale;
@@ -149,13 +155,33 @@ void map_draw_wifi(map_t *map, struct _rtk_fig_t *fig, int index);
  * Map manipulation macros
  *******************************************************************************/
 
-// Convert from map index to world coords
-#define MAP_WXGX(map, i) (map->origin_x + ((i) - map->size_x / 2) * map->scale)
-#define MAP_WYGY(map, j) (map->origin_y + ((j) - map->size_y / 2) * map->scale)
+// Offset of a map index from the map centre, along the map's own axes
+#define MAP_OXGX(map, i) (((i) - map->size_x / 2) * map->scale)
+#define MAP_OYGY(map, j) (((j) - map->size_y / 2) * map->scale)
+
+// Convert from map index to world coords. Both indices are needed on each
+// axis: where the map's own axes are turned against the world's, a cell's
+// world x depends on its row as well as on its column.
+#define MAP_WXGX(map, i, j) (map->origin_x \
+  + map->origin_cos_yaw * MAP_OXGX(map, i) \
+  - map->origin_sin_yaw * MAP_OYGY(map, j))
+#define MAP_WYGY(map, i, j) (map->origin_y \
+  + map->origin_sin_yaw * MAP_OXGX(map, i) \
+  + map->origin_cos_yaw * MAP_OYGY(map, j))
+
+// Offset of a world position from the map centre, along the map's own axes
+#define MAP_OXWX(map, x, y) ( \
+    map->origin_cos_yaw * ((x) - map->origin_x) \
+  + map->origin_sin_yaw * ((y) - map->origin_y))
+#define MAP_OYWY(map, x, y) ( \
+  - map->origin_sin_yaw * ((x) - map->origin_x) \
+  + map->origin_cos_yaw * ((y) - map->origin_y))
 
 // Convert from world coords to map coords
-#define MAP_GXWX(map, x) (floor((x - map->origin_x) / map->scale + 0.5) + map->size_x / 2)
-#define MAP_GYWY(map, y) (floor((y - map->origin_y) / map->scale + 0.5) + map->size_y / 2)
+#define MAP_GXWX(map, x, y) \
+  (floor(MAP_OXWX(map, x, y) / map->scale + 0.5) + map->size_x / 2)
+#define MAP_GYWY(map, x, y) \
+  (floor(MAP_OYWY(map, x, y) / map->scale + 0.5) + map->size_y / 2)
 
 // Test to see if the given map coords lie within the absolute map bounds.
 #define MAP_VALID(map, i, j) ((i >= 0) && (i < map->size_x) && (j >= 0) && (j < map->size_y))

@@ -14,6 +14,27 @@
     <a href="#run">run</a>
 </h3>
 
+## This branch is a repair and is not a released state
+
+**Read this before running anything from this branch or quoting any figure produced by it.** This is not the code the paper above was run with, and it is not what a user who installs the released package receives. It is the published tip with five defects repaired, grouped below into the four changes they take: the raycaster's split constructor, the conversion buffer on the stack, the sampling interval, the dropped origin orientation and the grid cast that never subtracted the origin. It exists so that the repairs can be read, built and measured on their own terms. Every figure a build from this branch produces belongs to this branch and must be attributed to it.
+
+What is repaired, in the order it matters:
+
+1. **The raycaster could not build a grid, by either route into it.** A commit of 2 July 2024 moved the grid population out of the occupancy map constructor that takes a file name and into a new one that takes a decoded pixel buffer. The new one is handed a bare buffer, which carries no dimensions, and assigns neither the width nor the height; the old one calls it as an expression statement, which builds a temporary and discards it rather than delegating. Since that day the scan method the package selects in its own configuration, `ray_marching`, has had no grid corresponding to the map to cast against. The repair gives the buffer route its two dimensions, makes the file name route delegate, frees the buffer the decode allocated, and routes both through one function so that both leave the same invariant behind.
+
+   If you are using the released package and cannot move to a repaired build, there is a one word change that avoids this entirely: set `map_scan_method` to `vanilla`. That route never touches this code, traces the occupancy grid message directly, and honours the map origin including its rotation. It is slower.
+
+2. **The map callback sized a buffer on the stack from the map message**, at four bytes a cell, which puts any map of a realistic size past the stack limit and kills the node in the callback before any scan method is consulted. The buffer is now on the heap, which is where every published state before the tip held it.
+
+3. **The hypothesis draw asked for the wrong interval.** For a map message origin `o` and an extent `W` it wants `[o, o + W]` and computed `[-o, W + o]`, which is the same interval with the origin's sign inverted. The two coincide where the origin is nought and the cell count even, part by the axis's first cell where the count is odd, and diverge with the origin otherwise: displaced enough, the interval inverts or leaves the map altogether, and the rejection loop that draws from it then draws, tests and never breaks.
+
+4. **The map origin's orientation was dropped, and the grid cast never subtracted the origin at all.** The internal map recorded the message origin's position and not its orientation, and had no field to hold one, so the free cell test answered about an unrotated ghost of the room hinged at the same corner. Separately the cast into the raycaster's grid divided a world position by the resolution with no reference to the map origin. The internal map now carries the origin's orientation, the conversion macros carry a rotation term, the draw runs over the map's own axes, and the cast subtracts the origin and rotates into those axes. On a map at the world origin with no rotation every one of these computes what it computed before.
+
+One interface changes with the fourth repair and it changes in the package's own headers: `MAP_WXGX`, `MAP_WYGY`, `MAP_GXWX` and `MAP_GYWY` each take both coordinates now rather than one. Under a rotation a cell's world x depends on its row as well as its column, and the two argument form cannot express the answer. Nothing inside this package called the first two; the other two are called in three places, all updated here.
+
+A further defect named in the same investigation is **not** repaired, because it is present in neither this state nor the last one whose raycaster runs: a commit of 1 July 2024 declared the map conversion to return a byte vector and gave it no return statement, and a later commit cured that by making the function return nothing. It is recorded here so that a reader looking for it knows why there is nothing to find.
+
+
 `cbgl` is a ROS package written in C++ that allows you to localise your 2D LIDAR sensor in a given 2D occupancy grid map under global uncertainty in position and orientation, in minimal time
 
 - You can expect the execution time to roughly have an order of magnitude of $`10e \cdot \text{area} \cdot N_s`$ microseconds, where $\text{area}$ is the area of the map's free space and $`N_s`$ is the LIDAR's number of rays. (Strictly speaking the execution time varies according to the geometry of the environment and other factors.) In the video below the environment area is $`2000`$ m$`^2`$ and localisation is performed in under four seconds

@@ -39,6 +39,9 @@ CBGL::CBGL(
   angle_inc_(0.0),
   map_res_(0.0),
   map_hgt_(0.0),
+  map_yaw_(0.0),
+  map_sin_yaw_(0.0),
+  map_cos_yaw_(1.0),
   top_k_caers_(10)
 {
   nh_private_.param<std::string>("pkg_name", PKG_NAME, "CBGL");
@@ -256,8 +259,18 @@ CBGL::convertMap(const nav_msgs::OccupancyGrid& map_msg)
   map->size_x = map_msg.info.width;
   map->size_y = map_msg.info.height;
   map->scale = map_msg.info.resolution;
-  map->origin_x = map_msg.info.origin.position.x + (map->size_x / 2) * map->scale;
-  map->origin_y = map_msg.info.origin.position.y + (map->size_y / 2) * map->scale;
+
+  map->origin_yaw = extractYawFromPose(map_msg.info.origin);
+  map->origin_sin_yaw = sin(map->origin_yaw);
+  map->origin_cos_yaw = cos(map->origin_yaw);
+
+  const double half_x = (map->size_x / 2) * map->scale;
+  const double half_y = (map->size_y / 2) * map->scale;
+
+  map->origin_x = map_msg.info.origin.position.x
+    + map->origin_cos_yaw * half_x - map->origin_sin_yaw * half_y;
+  map->origin_y = map_msg.info.origin.position.y
+    + map->origin_sin_yaw * half_x + map->origin_cos_yaw * half_y;
 
   /* Convert to player format */
   map->cells = (map_cell_t*)malloc(sizeof(map_cell_t)*map->size_x*map->size_y);
@@ -347,14 +360,15 @@ void CBGL::convertMapToPNG(
   const nav_msgs::OccupancyGrid& map_msg,
   const std::string& filename)
 {
-  unsigned char converted[4*map_msg.data.size()];
-  convertMapToPNG(map_msg, converted);
+  std::vector<unsigned char> converted(4*map_msg.data.size());
+  convertMapToPNG(map_msg, converted.data());
 
   /* Store png to disc */
   unsigned int width = map_msg.info.width;
   unsigned int height = map_msg.info.height;
   std::vector<uint8_t> png;
-  unsigned error = lodepng::encode(png, converted, width, height, LCT_RGBA, 8);
+  unsigned error =
+    lodepng::encode(png, converted.data(), width, height, LCT_RGBA, 8);
   if (error)
     throw std::runtime_error("Error encoding PNG: " +
       std::string(lodepng_error_text(error)));
@@ -1381,11 +1395,15 @@ CBGL::mapCallback(const nav_msgs::OccupancyGrid& map_msg)
   map_ = map_msg;
   map_res_ = map_.info.resolution;
   map_hgt_ = map_.info.height;
+  map_yaw_ = extractYawFromPose(map_.info.origin);
+  map_sin_yaw_ = sin(map_yaw_);
+  map_cos_yaw_ = cos(map_yaw_);
 
   /* Re-set the map png file */
-  unsigned char converted[4*map_msg.data.size()];
-  convertMapToPNG(map_msg, converted);
-  omap_ = ranges::OMap(converted);
+  std::vector<unsigned char> converted(4*map_msg.data.size());
+  convertMapToPNG(map_msg, converted.data());
+  omap_ = ranges::OMap(converted.data(),
+    map_msg.info.width, map_msg.info.height);
 
   received_map_ = true;
   if (received_scan_ && received_pose_cloud_ && received_start_signal_)
@@ -1875,11 +1893,22 @@ CBGL::scanMap(
     scan_method.compare("bresenham")    == 0 ||
     scan_method.compare("cddt")         == 0)
   {
-    /* Convert laser position to grid coordinates */
-    float x = current_laser_pose.position.x / map_.info.resolution;
+    /* Convert laser position to grid coordinates. The grid the raycaster
+     * holds is the map message's own cells, so a world position has to be
+     * brought into the map's own axes and measured from the map's origin
+     * before it can index into it, and the heading cast at has to be
+     * relative to those same axes. Where the origin is the world origin
+     * with no rotation this reduces to the position over the resolution,
+     * which is what it was. */
+    const double dx =
+      current_laser_pose.position.x - map_.info.origin.position.x;
+    const double dy =
+      current_laser_pose.position.y - map_.info.origin.position.y;
+
+    float x = (map_cos_yaw_ * dx + map_sin_yaw_ * dy) / map_.info.resolution;
     float y = map_.info.height - 1 -
-      current_laser_pose.position.y / map_.info.resolution;
-    float a = extractYawFromPose(current_laser_pose);
+      (-map_sin_yaw_ * dx + map_cos_yaw_ * dy) / map_.info.resolution;
+    float a = extractYawFromPose(current_laser_pose) - map_yaw_;
 
     /*
      * How many rays?
@@ -1989,11 +2018,22 @@ CBGL::scanMapPanoramic(
     scan_method.compare("bresenham")    == 0 ||
     scan_method.compare("cddt")         == 0)
   {
-    /* Convert laser position to grid coordinates */
-    float x = current_laser_pose.position.x / map_.info.resolution;
+    /* Convert laser position to grid coordinates. The grid the raycaster
+     * holds is the map message's own cells, so a world position has to be
+     * brought into the map's own axes and measured from the map's origin
+     * before it can index into it, and the heading cast at has to be
+     * relative to those same axes. Where the origin is the world origin
+     * with no rotation this reduces to the position over the resolution,
+     * which is what it was. */
+    const double dx =
+      current_laser_pose.position.x - map_.info.origin.position.x;
+    const double dy =
+      current_laser_pose.position.y - map_.info.origin.position.y;
+
+    float x = (map_cos_yaw_ * dx + map_sin_yaw_ * dy) / map_.info.resolution;
     float y = map_.info.height - 1 -
-      current_laser_pose.position.y / map_.info.resolution;
-    float a = extractYawFromPose(current_laser_pose);
+      (-map_sin_yaw_ * dx + map_cos_yaw_ * dy) / map_.info.resolution;
+    float a = extractYawFromPose(current_laser_pose) - map_yaw_;
 
     /* How many rays? */
     int num_rays = numRaysFromAngleRange(latest_world_scan_->angle_min,
@@ -2260,25 +2300,30 @@ CBGL::uniformPoseGenerator(void* arg)
 {
   map_t* map = (map_t*)arg;
 
-  double min_x, max_x, min_y, max_y;
-
-  min_x = (map->size_x * map->scale)/2.0 - map->origin_x;
-  max_x = (map->size_x * map->scale)/2.0 + map->origin_x;
-  min_y = (map->size_y * map->scale)/2.0 - map->origin_y;
-  max_y = (map->size_y * map->scale)/2.0 + map->origin_y;
+  /* The draw runs over the map's whole extent, expressed as offsets from its
+   * centre along its own axes, and every draw is then carried out to world
+   * coordinates. Drawing in the map's own axes is what lets a map whose axes
+   * are turned against the world's be covered at all. */
+  const double half_x = (map->size_x * map->scale)/2.0;
+  const double half_y = (map->size_y * map->scale)/2.0;
 
   pf_vector_t p;
 
   for(;;)
   {
-    p.v[0] = min_x + drand48() * (max_x - min_x);
-    p.v[1] = min_y + drand48() * (max_y - min_y);
+    const double offset_x = -half_x + drand48() * 2*half_x;
+    const double offset_y = -half_y + drand48() * 2*half_y;
+
+    p.v[0] = map->origin_x
+      + map->origin_cos_yaw * offset_x - map->origin_sin_yaw * offset_y;
+    p.v[1] = map->origin_y
+      + map->origin_sin_yaw * offset_x + map->origin_cos_yaw * offset_y;
     p.v[2] = drand48() * 2*M_PI - M_PI;
 
     /* Check that it's a free cell */
     int i,j;
-    i = MAP_GXWX(map, p.v[0]);
-    j = MAP_GYWY(map, p.v[1]);
+    i = MAP_GXWX(map, p.v[0], p.v[1]);
+    j = MAP_GYWY(map, p.v[0], p.v[1]);
     if(MAP_VALID(map,i,j) && (map->cells[MAP_INDEX(map,i,j)].occ_state == -1))
       break;
   }

@@ -156,56 +156,64 @@ namespace ranges {
 		}
 
 		OMap(std::string filename) : OMap(filename, 128) {}
-		OMap(std::string filename, float threshold) : fn(filename), has_error(false) {
-			unsigned error;
+		OMap(std::string filename, float threshold) : has_error(false), fn(filename) {
 			unsigned char* image;
 
-			error = lodepng_decode32_file(&image, &width, &height, filename.c_str());
-      OMap(image, threshold);
-		}
-
-		OMap(unsigned char* image) : OMap(image, 128) {}
-		OMap(unsigned char* image, float threshold) : has_error(false) {
-			unsigned error;
-
+			const unsigned error =
+				lodepng_decode32_file(&image, &width, &height, filename.c_str());
 			if(error) {
 				printf("ERROR %u: %s\n", error, lodepng_error_text(error));
 				has_error = true;
 				return;
 			}
 
-			for (int i = 0; i < width; ++i) {
+			populate(image, threshold);
+			free(image);
+		}
+
+		OMap(unsigned char* image, unsigned w, unsigned h) : OMap(image, w, h, 128) {}
+		OMap(unsigned char* image, unsigned w, unsigned h, float threshold)
+			: has_error(false), width(w), height(h), fn("") {
+			populate(image, threshold);
+		}
+
+		/** @brief Fill the grids from a decoded RGBA buffer of width by height
+		 *  pixels. Both constructors that take an image route through here, so
+		 *  each of them leaves the same class invariant behind: the grids are
+		 *  width by height, and every cell of them has been written. */
+		void populate(const unsigned char* image, float threshold) {
+			for (unsigned i = 0; i < width; ++i) {
 				std::vector<bool> y_axis;
-				for (int q = 0; q < height; ++q) y_axis.push_back(false);
+				for (unsigned q = 0; q < height; ++q) y_axis.push_back(false);
 				grid.push_back(y_axis);
 			}
 
-			for (int i = 0; i < width; ++i) {
+			for (unsigned i = 0; i < width; ++i) {
 				std::vector<float> y_axis;
-				for (int q = 0; q < height; ++q) y_axis.push_back(0);
+				for (unsigned q = 0; q < height; ++q) y_axis.push_back(0);
 				raw_grid.push_back(y_axis);
 			}
 
 			#if _MAKE_TRACE_MAP == 1
-			for (int i = 0; i < width; ++i) {
+			for (unsigned i = 0; i < width; ++i) {
 				std::vector<bool> y_axis;
-				for (int q = 0; q < height; ++q) y_axis.push_back(false);
+				for (unsigned q = 0; q < height; ++q) y_axis.push_back(false);
 				trace_grid.push_back(y_axis);
 			}
 			#endif
 
-			for (int y = 0; y < height; ++y) {
-				for (int x = 0; x < width; ++x) {
-					unsigned idx = 4 * y * width + 4 * x;
-					int r = image[idx + 2];
-					int g = image[idx + 1];
-					int b = image[idx + 0];
-					int gray = (int) utils::rgb2gray(r,g,b);
+			for (unsigned y = 0; y < height; ++y) {
+				for (unsigned x = 0; x < width; ++x) {
+					const unsigned idx = 4 * y * width + 4 * x;
+					const int r = image[idx + 2];
+					const int g = image[idx + 1];
+					const int b = image[idx + 0];
+					const int gray = (int) utils::rgb2gray(r,g,b);
 					if (gray < threshold) grid[x][y] = true;
 					raw_grid[x][y] = gray;
 				}
 			}
-    }
+		}
 
 		bool get(int x, int y) { return grid[x][y]; }
 		bool isOccupied(int x, int y) {

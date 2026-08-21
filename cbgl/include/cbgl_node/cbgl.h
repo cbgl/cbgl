@@ -126,6 +126,12 @@ class CBGL
     double map_res_;
     unsigned int map_hgt_;
 
+    /* cache the map origin's orientation, and its sine and cosine, so that a
+     * cast into the grid need not derive them from a quaternion every time */
+    double map_yaw_;
+    double map_sin_yaw_;
+    double map_cos_yaw_;
+
     /* For generating the hypothesis set H */
     pf_t *pf_hyp_;
     map_t* map_hyp_;

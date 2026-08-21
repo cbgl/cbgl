@@ -42,9 +42,12 @@ map_t *map_alloc(void)
 
   map = (map_t*) malloc(sizeof(map_t));
 
-  // Assume we start at (0, 0)
+  // Assume we start at (0, 0), with the map's own axes along the world's
   map->origin_x = 0;
   map->origin_y = 0;
+  map->origin_yaw = 0;
+  map->origin_sin_yaw = 0;
+  map->origin_cos_yaw = 1;
 
   // Make the size odd
   map->size_x = 0;
@@ -75,8 +78,8 @@ map_cell_t *map_get_cell(map_t *map, double ox, double oy, double oa)
   int i, j;
   map_cell_t *cell;
 
-  i = MAP_GXWX(map, ox);
-  j = MAP_GYWY(map, oy);
+  i = MAP_GXWX(map, ox, oy);
+  j = MAP_GYWY(map, ox, oy);
 
   if (!MAP_VALID(map, i, j))
     return NULL;
