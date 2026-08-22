@@ -23,3 +23,7 @@ find_package(PkgConfig REQUIRED)
 if(NOT TARGET PkgConfig::FFTW3)
   pkg_check_modules(FFTW3 REQUIRED IMPORTED_TARGET fftw3)
 endif()
+
+if(NOT TARGET yaml-cpp::yaml-cpp)
+  find_package(yaml-cpp REQUIRED)
+endif()

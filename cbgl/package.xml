@@ -20,6 +20,7 @@
   <depend>tf2</depend>
   <depend>tf2_ros</depend>
   <depend>libfftw3</depend>
+  <depend>yaml-cpp</depend>
   <depend>pkg-config</depend>
 
   <test_depend>ament_lint_auto</test_depend>

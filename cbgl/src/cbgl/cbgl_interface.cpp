@@ -40,6 +40,7 @@
 #include <tf2/LinearMath/Quaternion.hpp>
 
 #include "cbgl/free_space.hpp"
+#include "cbgl/map_file.hpp"
 
 namespace cbgl
 {
@@ -299,6 +300,13 @@ std::optional<double> yawOf(const geometry_msgs::msg::Quaternion& orientation)
  * @details Every refusal a setting can earn is decided here, before a
  * subscription, a publisher or a service exists, so that the node either comes
  * up usable or does not come up at all.
+ * Which of the two map routes is taken is decided here too, and once only. A
+ * named `map_topic` is subscribed and `map_file` is then ignored with a word
+ * said about it, because a topic can deliver a second map and a file cannot. An
+ * empty `map_topic` and a named `map_file` read that file now, and a file that
+ * cannot be read or cannot be localised in is a refusal to start rather than a
+ * node standing by for a map that will never arrive. Both empty is refused
+ * outright.
  * The transform listener and the transform broadcaster are handed plain
  * subscription and publisher options rather than their own defaults, which ask
  * for quality of service overrides and would declare eleven parameters on this
@@ -394,12 +402,14 @@ Interface::Interface(const rclcpp::NodeOptions& options)
   map_topic_ = get_parameter("map_topic").as_string();
   scan_topic_ = get_parameter("scan_topic").as_string();
 
+  const std::string map_file = get_parameter("map_file").as_string();
+
   const std::string output_pose_topic =
     get_parameter("output_pose_topic").as_string();
 
   for (const auto& [name, value] : {
-      std::pair<std::string, std::string>{"map_topic", map_topic_},
-      {"output_pose_topic", output_pose_topic},
+      std::pair<std::string, std::string>{"output_pose_topic",
+        output_pose_topic},
       {"scan_topic", scan_topic_}})
   {
     if (value.empty())
@@ -408,6 +418,24 @@ Interface::Interface(const rclcpp::NodeOptions& options)
       RCLCPP_FATAL(get_logger(), "Refusing to start: %s", problem.c_str());
       throw std::invalid_argument(problem);
     }
+  }
+
+  if (map_topic_.empty() && map_file.empty())
+  {
+    const std::string problem = "one of map_topic and map_file is required, "
+      "and both are empty: a map reaches this node either on a topic or from a "
+      "map description file on disk, and it cannot localise in no map at all";
+    RCLCPP_FATAL(get_logger(), "Refusing to start: %s", problem.c_str());
+    throw std::invalid_argument(problem);
+  }
+
+  if (!map_topic_.empty() && !map_file.empty())
+  {
+    RCLCPP_WARN(get_logger(),
+      "map_topic \"%s\" and map_file \"%s\" are both set. The topic wins and "
+      "the file is ignored, since a topic can deliver a second map and a file "
+      "cannot. Empty map_topic to localise in the file instead.",
+      map_topic_.c_str(), map_file.c_str());
   }
 
   initial_cov_aa_ = get_parameter("initial_cov_aa").as_double();
@@ -421,6 +449,31 @@ Interface::Interface(const rclcpp::NodeOptions& options)
     {
       RCLCPP_INFO(logger, "%s", message.c_str());
     });
+
+  if (map_topic_.empty())
+  {
+    const std::expected<nav_msgs::msg::OccupancyGrid, std::string> described =
+      mapFromFile(map_file);
+
+    if (!described.has_value())
+    {
+      RCLCPP_FATAL(get_logger(), "Refusing to start: %s",
+        described.error().c_str());
+      throw std::invalid_argument(described.error());
+    }
+
+    nav_msgs::msg::OccupancyGrid map = *described;
+    map.header.frame_id = global_frame_id_;
+
+    if (const std::string problem = takeMap(map); !problem.empty())
+    {
+      const std::string refusal = std::format(
+        "the map described by {} cannot be localised in: {}", map_file,
+        problem);
+      RCLCPP_FATAL(get_logger(), "Refusing to start: %s", refusal.c_str());
+      throw std::invalid_argument(refusal);
+    }
+  }
 
   transform_buffer_ = std::make_unique<tf2_ros::Buffer>(get_clock());
   transform_listener_ = std::make_shared<tf2_ros::TransformListener>(
@@ -465,12 +518,15 @@ Interface::Interface(const rclcpp::NodeOptions& options)
       map_scan_topic, 1);
   }
 
-  map_subscription_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
-    map_topic_, rclcpp::QoS(1).transient_local(),
-    [this](nav_msgs::msg::OccupancyGrid::ConstSharedPtr map)
-    {
-      mapCallback(std::move(map));
-    });
+  if (!map_topic_.empty())
+  {
+    map_subscription_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
+      map_topic_, rclcpp::QoS(1).transient_local(),
+      [this](nav_msgs::msg::OccupancyGrid::ConstSharedPtr map)
+      {
+        mapCallback(std::move(map));
+      });
+  }
 
   scan_subscription_ = create_subscription<sensor_msgs::msg::LaserScan>(
     scan_topic_, *scan_qos,
@@ -502,6 +558,7 @@ void Interface::declareParameters()
 
   declare_parameter("scan_topic", "/scan", readOnly());
   declare_parameter("map_topic", "/map", readOnly());
+  declare_parameter("map_file", "", readOnly());
   declare_parameter("output_pose_topic", "/initialpose", readOnly());
   declare_parameter("hypotheses_topic", "", readOnly());
   declare_parameter("top_hypotheses_topic", "", readOnly());
@@ -591,6 +648,9 @@ void Interface::globalLocalisation(
  * placement afterwards would ask a tree that keeps ten seconds of history for a
  * stamp a long run has left behind, and a run on a real building at the shipped
  * hypothesis density takes longer than that.
+ * @remark The refusal for want of a map names the topic because that is the
+ * only route it can happen on. A node reading its map from a file holds that
+ * map from the end of its own construction, or it does not exist.
  */
 void Interface::localiseOnce(std_srvs::srv::Trigger::Response& outcome)
 {
@@ -705,45 +765,28 @@ void Interface::localiseOnce(std_srvs::srv::Trigger::Response& outcome)
   RCLCPP_INFO(get_logger(), "%s", outcome.message.c_str());
 }
 
+/**
+ * @details A map that arrives on the topic and is refused is said out loud and
+ * dropped, and whatever map the node already held it keeps. A run under way
+ * finishes against the map it started with either way.
+ * @remark Taking a map allocates: the blocked bitmap, the free space, and the
+ * casting table where that caster is configured. On a large map any of those
+ * can fail, and an exception leaving a callback takes the executor and the
+ * whole node with it. The service path guards the same hazard on the same map
+ * for the same reason, so this guards it too: a map that cannot be taken is a
+ * map to drop, not a node to lose.
+ */
 void Interface::mapCallback(nav_msgs::msg::OccupancyGrid::ConstSharedPtr map)
 {
-  const std::expected<std::shared_ptr<
-    const fsm_localisation::OccupancyGridMap>, std::string> built =
-    fsm_localisation::OccupancyGridMap::build(*map,
-      parameters_.matcher.occupancy_threshold, casting_method_);
-
-  if (!built.has_value())
+  try
   {
-    RCLCPP_ERROR(get_logger(), "Ignoring this map: %s", built.error().c_str());
-    return;
+    if (const std::string problem = takeMap(*map); !problem.empty())
+      RCLCPP_ERROR(get_logger(), "Ignoring this map: %s", problem.c_str());
   }
-
-  FreeSpace free_space = freeSpaceOf(**built);
-  const std::size_t free_cells = free_space.cells.size();
-
-  const auto localiser =
-    std::make_shared<const Localiser>(parameters_, *built,
-      std::move(free_space));
-
+  catch (const std::exception& ex)
   {
-    const std::lock_guard<std::mutex> lock(held_mutex_);
-    map_ = *built;
-    localiser_ = localiser;
+    RCLCPP_ERROR(get_logger(), "Ignoring this map: %s", ex.what());
   }
-
-  if (map->header.frame_id != global_frame_id_)
-  {
-    RCLCPP_WARN(get_logger(),
-      "This map is labelled \"%s\" and every answer from it will be labelled "
-      "\"%s\", which is what global_frame_id says. An answer's coordinates are "
-      "the map's own, so the two names have to mean the same frame.",
-      map->header.frame_id.c_str(), global_frame_id_.c_str());
-  }
-
-  RCLCPP_INFO(get_logger(),
-    "Map taken: %u by %u cells at %.3f m, %zu of them free, cast by %s.",
-    map->info.width, map->info.height, map->info.resolution, free_cells,
-    std::string(fsm_localisation::nameOfCastingMethod(casting_method_)).c_str());
 }
 
 /**
@@ -995,6 +1038,56 @@ std::expected<Pose, std::string> Interface::sensorOnRobot(
   return std::unexpected("the sensor's placement on the robot cannot be read, "
     + sensor_frame_id + " being the frame the scan itself names: "
     + placement.error());
+}
+
+/**
+ * @details Building the map, walking its free space and constructing the
+ * localiser over both happen here, off the lock, and only the swap of the two
+ * finished objects is taken under it. A run that is already under way holds its
+ * own map and its own localiser and is unaffected by either.
+ * @remark What is refused, and by whom, is not restated here. The map's own
+ * builder judges the message and names the field it refused, and this hands that
+ * sentence back to whichever of the two callers asked, so that a topic can log
+ * it and a start up can die of it.
+ */
+std::string Interface::takeMap(const nav_msgs::msg::OccupancyGrid& map)
+{
+  const std::expected<std::shared_ptr<
+    const fsm_localisation::OccupancyGridMap>, std::string> built =
+    fsm_localisation::OccupancyGridMap::build(map,
+      parameters_.matcher.occupancy_threshold, casting_method_);
+
+  if (!built.has_value())
+    return built.error();
+
+  FreeSpace free_space = freeSpaceOf(**built);
+  const std::size_t free_cells = free_space.cells.size();
+
+  const auto localiser =
+    std::make_shared<const Localiser>(parameters_, *built,
+      std::move(free_space));
+
+  {
+    const std::lock_guard<std::mutex> lock(held_mutex_);
+    map_ = *built;
+    localiser_ = localiser;
+  }
+
+  if (map.header.frame_id != global_frame_id_)
+  {
+    RCLCPP_WARN(get_logger(),
+      "This map is labelled \"%s\" and every answer from it will be labelled "
+      "\"%s\", which is what global_frame_id says. An answer's coordinates are "
+      "the map's own, so the two names have to mean the same frame.",
+      map.header.frame_id.c_str(), global_frame_id_.c_str());
+  }
+
+  RCLCPP_INFO(get_logger(),
+    "Map taken: %u by %u cells at %.3f m, %zu of them free, cast by %s.",
+    map.info.width, map.info.height, map.info.resolution, free_cells,
+    std::string(fsm_localisation::nameOfCastingMethod(casting_method_)).c_str());
+
+  return {};
 }
 
 }

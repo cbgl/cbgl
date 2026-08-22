@@ -27,6 +27,7 @@ find_package(nav_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
+find_package(yaml-cpp REQUIRED)
 
 add_library(cbgl_core SHARED
   src/cbgl/cbgl.cpp)
@@ -49,11 +50,23 @@ target_link_libraries(cbgl_grid PUBLIC
   cbgl_core
   fsm_localisation::fsm_localisation_grid)
 
+add_library(cbgl_map_file SHARED
+  src/cbgl/map_file.cpp)
+
+target_include_directories(cbgl_map_file PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>)
+
+target_link_libraries(cbgl_map_file
+  PUBLIC ${nav_msgs_TARGETS}
+  PRIVATE yaml-cpp::yaml-cpp)
+
 add_library(cbgl_interface SHARED
   src/cbgl/cbgl_interface.cpp)
 
 target_link_libraries(cbgl_interface PUBLIC
   cbgl_grid
+  cbgl_map_file
   rclcpp::rclcpp
   tf2::tf2
   tf2_ros::tf2_ros
@@ -114,6 +127,10 @@ if(BUILD_TESTING)
   target_compile_definitions(test_cbgl_localiser PRIVATE
     CBGL_TEST_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures")
 
+  ament_add_gtest(test_cbgl_map_file
+    test/test_map_file.cpp)
+  target_link_libraries(test_cbgl_map_file cbgl_map_file)
+
   ament_add_gtest(test_cbgl_node_params
     test/test_node_params.cpp
     ENV ROS_DOMAIN_ID=81)
@@ -133,6 +150,10 @@ if(BUILD_TESTING)
     TIMEOUT 300)
 
   find_package(launch_testing_ament_cmake REQUIRED)
+
+  add_launch_test(test/test_map_from_file.py TIMEOUT 300
+    ENV ROS_DOMAIN_ID=88
+    APPEND_ENV PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/test)
 
   add_launch_test(test/test_node_behaviour.py TIMEOUT 400
     ENV ROS_DOMAIN_ID=82
@@ -178,6 +199,7 @@ install(TARGETS
   cbgl_core
   cbgl_grid
   cbgl_interface
+  cbgl_map_file
   EXPORT export_cbgl
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib

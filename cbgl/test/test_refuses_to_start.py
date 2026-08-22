@@ -59,6 +59,15 @@ build got wrong: it wrote a slashed frame into the answer it published, which tf
 rejects outright. Refusing it at start-up is what keeps a configuration from
 carrying that mistake back in.
 
+**Two of the cases are about where the map comes from.** A map reaches this node
+either on a topic or from a map description file on disk, and one of the two
+settings has to name something. A node given neither would come up and then
+refuse every request it was ever sent, which reads in a log exactly like a map
+server that has not started yet. A file that cannot be read is refused for the
+same reason and at the same moment: it is a matter of configuration entirely,
+and discovering it at the first request would be discovering it hours after
+whoever could fix it walked away.
+
 **The caster's name is refused by nobody but the node.** The matcher's own
 validator, which judges the rest of the matcher's settings, carries no rule for
 it, and the library defers to that validator rather than keeping a second copy.
@@ -68,7 +77,7 @@ rest do. That is why the caster case is here rather than among the library's own
 parameter cases.
 
 **The processes are held in a module of their own rather than asked for one at a
-time.** There are eleven of them, and naming each as an argument of each case,
+time.** There are thirteen of them, and naming each as an argument of each case,
 twice over, would be a page of names before the first assertion. They are the
 same objects the launch description carries.
 """
@@ -90,6 +99,8 @@ CASES = {
     'bad_dl': ({'dl': -2.5}, ('dl', '-2.5')),
     'bad_frame': ({'global_frame_id': '/map'},
                   ('global_frame_id', '/map')),
+    'bad_map_file': ({'map_topic': '', 'map_file': '/nowhere/room.yaml'},
+                     ('/nowhere/room.yaml',)),
     'bad_output_topic': ({'output_pose_topic': ''},
                          ('output_pose_topic', 'must name a topic')),
     'bad_ray_search': ({'ray_search': 'spiral'}, ('ray_search', 'spiral')),
@@ -100,6 +111,7 @@ CASES = {
     'bad_timeout': ({'tf_lookup_timeout': float('inf')},
                     ('tf_lookup_timeout', 'inf')),
     'bad_top_k': ({'top_k_caers': 0}, ('top_k_caers', '0')),
+    'no_map_at_all': ({'map_topic': ''}, ('map_topic', 'map_file')),
 }
 
 CONTROL = 'in_range'

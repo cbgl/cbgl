@@ -102,7 +102,7 @@ Neither does the rest of this family. There is therefore nothing for a pre-commi
 
 ## What the comparison against the ROS 1 build settled, and the one thing it did not
 
-That comparison lives in a sibling repository, `cbgl-tests`, laid out beside this one so that recordings, containers and build outputs never weigh down a clone of the package. **It has now been run.** Both halves of it, as each build ships and with both handed one hypothesis set, over seven scenario and resolution pairs, 5600 trials, against the ROS 1 build at the last commit that runs. Its figures are in that repository's own results document. Two of the three questions below are answered by it, and so is the cell centre question higher up this file.
+That comparison lives in a sibling repository, `cbgl-tests`, laid out beside this one so that recordings, containers and build outputs never weigh down a clone of the package. **It has now been run.** Both halves of it, as each build ships and with both handed one hypothesis set, over seven scenario and resolution pairs, 5600 trials, against the ROS 1 build at `fb9dab1` of 15 May 2024, which was then the last state whose caster ran. The tip has since been repaired and runs too, so that phrasing no longer identifies a state on its own; the commit does. Its figures are in that repository's own results document. Two of the three questions below are answered by it, and so is the cell centre question higher up this file.
 
 ### The wider translation bound is right and stays at 1.2 m
 

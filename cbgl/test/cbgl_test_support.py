@@ -89,6 +89,10 @@ SCAN_STAMP = (1700000000, 250000000)
 MAP_TOPIC = '/map'
 SCAN_TOPIC = '/scan'
 
+MAP_FILE_FREE = 254
+MAP_FILE_OCCUPIED = 0
+MAP_FILE_UNKNOWN = 205
+
 SERVICE_TIMEOUT = 240.0
 
 
@@ -346,6 +350,55 @@ def wrap(angle):
     return math.remainder(angle, 2.0 * math.pi)
 
 
+def write_map_file(directory, grid, name='room'):
+    """
+    Write one of the fixture grids as a map description and a PGM beside it.
+
+    The samples are the ones ROS map saving writes: 254 for a free cell, 0 for
+    an occupied one and 205 for a cell nobody has seen, that last being the
+    value the default free threshold of 0.196 was chosen to leave outside. The
+    rows are written from the last of the grid to the first, because a PGM's
+    first row is the top of the picture and a grid's first row is the one at the
+    origin.
+
+    The description states the origin the grid carries, translation and yaw
+    both, so a node reading it is placed exactly where a node given the same
+    grid on a topic would be.
+
+    Returns the path of the description, which is what the node is pointed at.
+    """
+    picture = os.path.join(directory, name + '.pgm')
+    description = os.path.join(directory, name + '.yaml')
+
+    samples = bytearray()
+
+    for row in reversed(range(grid.height)):
+        for column in range(grid.width):
+            value = grid.cells[row * grid.width + column]
+
+            if value < 0:
+                samples.append(MAP_FILE_UNKNOWN)
+            elif value >= OCCUPANCY_THRESHOLD:
+                samples.append(MAP_FILE_OCCUPIED)
+            else:
+                samples.append(MAP_FILE_FREE)
+
+    with open(picture, 'wb') as handle:
+        handle.write(('P5\n%d %d\n255\n' % (grid.width, grid.height)).encode())
+        handle.write(bytes(samples))
+
+    with open(description, 'w') as handle:
+        handle.write('image: %s\n' % os.path.basename(picture))
+        handle.write('resolution: %.17g\n' % grid.resolution)
+        handle.write('origin: [%.17g, %.17g, %.17g]\n' % grid.origin)
+        handle.write('negate: 0\n')
+        handle.write('occupied_thresh: 0.65\n')
+        handle.write('free_thresh: 0.196\n')
+        handle.write('mode: trinary\n')
+
+    return description
+
+
 def yaw_of(orientation):
     """Return the heading a quaternion carries, about z."""
     return wrap(2.0 * math.atan2(orientation.z, orientation.w))
@@ -360,6 +413,11 @@ class Harness(Node):
     transform tree cannot be divided that way, being one tree, so a case that
     needs a placement to be missing withholds a placement for the frame its own
     scan names rather than a topic.
+
+    An empty map topic drives a node that reads its map from a file instead. No
+    map publisher is created and nothing waits for a subscriber to one, since
+    such a node subscribes to no map topic at all and a wait for one would time
+    out every time.
 
     The scan publisher's reliability and queue depth can be given too, and
     default to what a scan is published with everywhere else here. A best effort
@@ -412,8 +470,8 @@ class Harness(Node):
         latched.reliability = ReliabilityPolicy.RELIABLE
         latched.durability = DurabilityPolicy.TRANSIENT_LOCAL
 
-        self.map_publisher = self.create_publisher(OccupancyGrid, map_topic,
-                                                   latched)
+        self.map_publisher = self.create_publisher(
+            OccupancyGrid, map_topic, latched) if map_topic else None
         self.static_transform_publisher = self.create_publisher(
             TFMessage, '/tf_static', latched)
         scanning = QoSProfile(depth=scan_depth)
@@ -514,6 +572,10 @@ class Harness(Node):
 
     def publish_map(self, grid, stamp=MAP_STAMP, frame_id=GLOBAL_FRAME):
         """Send one map to the node, latched as a map server publishes one."""
+        assert self.map_publisher is not None, \
+            'this harness was given no map topic, so it drives a node that ' \
+            'reads its map from a file and there is nowhere to publish one'
+
         self.map_publisher.publish(build_map(stamp, grid, frame_id))
 
     def publish_odometry_placement(self, placement=ROBOT_IN_ODOMETRY):
@@ -563,10 +625,13 @@ class Harness(Node):
         anybody had subscribed is a transform nobody ever receives.
         """
         publishers = {
-            self.map_topic: self.map_publisher,
             self.scan_topic: self.scan_publisher,
             '/tf_static': self.static_transform_publisher,
         }
+
+        if self.map_publisher is not None:
+            publishers[self.map_topic] = self.map_publisher
+
         deadline = time.monotonic() + timeout
 
         while True:

@@ -34,7 +34,26 @@
     # depth of one, so a map latched before this node started is delivered on
     # subscription rather than waited for. A second map replaces the first; a
     # run already under way finishes against the map it started with.
+    #
+    # Empty this to read the map from map_file instead, in which case nothing is
+    # subscribed. One of the two is required and the node refuses to start with
+    # neither.
     map_topic: "/map"
+
+    # A map description file on disk, in the format a map server reads: a YAML
+    # naming an image, a resolution and an origin, with negate, occupied_thresh
+    # and free_thresh optional. The image is a PGM, binary or plain, and nothing
+    # else; a map saved by ROS is one already.
+    #
+    # It is read once, at start up, and the map it describes is then the map for
+    # the life of the node. A file that cannot be read, or that describes a map
+    # nothing can be localised in, stops the node coming up rather than leaving
+    # it standing by for a map that can never arrive.
+    #
+    # Ignored, with a warning, while map_topic names a topic. Nothing here can
+    # replace a map once it is up, so a deployment that expects a second map
+    # wants the topic.
+    map_file: ""
 
     # Where the answer is published, as a pose of the robot rather than of the
     # sensor, in global_frame_id, stamped from the scan it was computed from.

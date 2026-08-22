@@ -8,7 +8,7 @@
 
 `cbgl` localises a 2D lidar sensor in a known 2D occupancy grid under global uncertainty in both position and orientation, from a single scan, in one shot. It needs no motion and no initial guess: give it a map, give it one scan, ask it once, and it tells you where the sensor was.
 
-This is the ROS 2 version. The published ROS 1 Kinetic package is preserved unchanged on the `kinetic-devel` branch, and [Upgrading from the ROS 1 version](#upgrading-from-the-ros-1-version) lists every name and every behaviour that changed.
+This is the ROS 2 version. The ROS 1 Kinetic package is on the `kinetic-devel` branch, where it has since been repaired, and [Upgrading from the ROS 1 version](#upgrading-from-the-ros-1-version) lists every name and every behaviour that changed.
 
 https://github.com/li9i/cbgl/assets/1658819/5794cd21-651d-4924-b453-25c46b9e42a9
 
@@ -115,12 +115,13 @@ colcon build --packages-up-to cbgl --cmake-args \
 
 ### As a dependency of your own package
 
-Three libraries are exported. Link the narrowest one that does what you need.
+Four libraries are exported. Link the narrowest one that does what you need.
 
 | Target | Knows about | Use it for |
 | --- | --- | --- |
 | `cbgl::cbgl_core` | nothing of ROS, not even a message type | the algorithm itself, given a grid and a scan |
 | `cbgl::cbgl_grid` | occupancy grid messages, no `rclcpp` | turning a map message into the free space the search draws from |
+| `cbgl::cbgl_map_file` | occupancy grid messages and `yaml-cpp`, no `rclcpp` | reading a map description file and its PGM into a map message |
 | `cbgl::cbgl_interface` | everything ROS | embedding the node in a process of your own |
 
 ```cmake
@@ -150,6 +151,38 @@ The call returns when the localisation is **done**, which can be seconds later, 
 
 The service is node relative, so it follows `node_name`.
 
+### Taking the map from a file instead of a topic
+
+Empty `map_topic` and point `map_file` at a map description file on disk. The node then subscribes to no map topic at all.
+
+```yaml
+/**:
+  ros__parameters:
+    map_topic: ""
+    map_file: "/maps/room.yaml"
+```
+
+The description is the format a map server reads:
+
+```yaml
+image: room.pgm
+resolution: 0.05
+origin: [-1.35, 2.70, 0.60]
+negate: 0
+occupied_thresh: 0.65
+free_thresh: 0.196
+```
+
+`image`, `resolution` and `origin` are required. `negate`, `occupied_thresh` and `free_thresh` default to `0`, `0.65` and `0.196`, and anything else in the file is ignored. A relative image path is resolved against the directory the description itself sits in.
+
+The image is a **PGM**, either the binary `P5` variant or the plain `P2` one, which is what ROS map saving writes. No other format is read: this package links no image library and neither does its ROS 1 counterpart, so PGM is the one format both of them can be held to.
+
+A picture is read on its own terms. The maximum sample value it declares is what its samples are rescaled from, so a picture declaring 15 means its 15 to be white exactly as a saved map means its 255, and a maximum above 255 is two bytes a sample with the more significant byte first. A maximum of nought, a maximum above 65535, and a sample above the maximum its own picture declares are each refused by name.
+
+The file is read once, at start-up, and the map it describes is then the map for the life of the node. A description that cannot be read, a key that is missing, an image in another format and a map nothing can be localised in are each a refusal to start, naming the file and the key, rather than a node that comes up and refuses every request afterwards.
+
+Naming both settings is allowed: the topic wins, the file is ignored, and a warning says so. Naming neither is refused at start-up.
+
 ### Feeding it a map from a recording
 
 The map subscription asks for **latched** delivery, so that a map published before this node started still arrives. A map server publishes that way and needs nothing said. A plain recording playback does not, and a subscription asking for latched delivery does not match a publisher that does not offer it, so the node waits and every call is refused for want of a map with the recording running in front of it.
@@ -174,7 +207,7 @@ Scans need nothing of the sort, the scan subscription being ordinary.
 | Direction | Topic | Type | What |
 | --- | --- | --- | --- |
 | in | `scan_topic` | `sensor_msgs/msg/LaserScan` | the measurement. The newest is held and nothing happens until the service is called |
-| in | `map_topic` | `nav_msgs/msg/OccupancyGrid` | the map to localise in. Subscribed transient local at depth one, so a map latched before the node started arrives on subscription |
+| in | `map_topic` | `nav_msgs/msg/OccupancyGrid` | the map to localise in. Subscribed transient local at depth one, so a map latched before the node started arrives on subscription. Empty subscribes nothing and the map is read from `map_file` instead |
 | out | `output_pose_topic` | `geometry_msgs/msg/PoseWithCovarianceStamped` | the answer, as a pose of the **robot**, in `global_frame_id`, stamped from the scan it was computed from |
 | out | `hypotheses_topic` | `geometry_msgs/msg/PoseArray` | optional. Every hypothesis the search started from |
 | out | `top_hypotheses_topic` | `geometry_msgs/msg/PoseArray` | optional. The survivors of the sift, in ranking order |
@@ -196,11 +229,19 @@ The **Default** column is what the node declares. The **Shipped** column is what
 | Parameter | Meaning | Default | Shipped |
 | --- | --- | --- | --- |
 | `scan_topic` | where 2D panoramic scans are published | `/scan` | `/scan` |
-| `map_topic` | the map to localise in | `/map` | `/map` |
 | `output_pose_topic` | where the answer is published | `/initialpose` | `/initialpose` |
 | `hypotheses_topic` | optional. Every hypothesis drawn. Empty publishes nothing | empty | empty |
 | `top_hypotheses_topic` | optional. The survivors of the sift. Empty publishes nothing | empty | empty |
 | `map_scan_topic` | optional. The scan the answer would see. Empty publishes nothing | empty | empty |
+
+### Where the map comes from
+
+One of the two settings below has to name something. Both empty is refused at start-up, and both named is the topic with a warning that the file was ignored.
+
+| Parameter | Meaning | Default | Shipped |
+| --- | --- | --- | --- |
+| `map_topic` | the topic the map arrives on. Empty subscribes nothing | `/map` | `/map` |
+| `map_file` | a map description file on disk, read once at start-up. Empty reads no file | empty | empty |
 
 ### Frames
 
@@ -333,13 +374,19 @@ These figures come from that one small room and from nothing larger. The number 
 
 ## Upgrading from the ROS 1 version
 
-The ROS 1 Kinetic package is on `kinetic-devel` and is unchanged. This version is not a drop-in replacement.
+The ROS 1 Kinetic package is on `kinetic-devel`. This version is not a drop-in replacement.
 
-**Before you go back to that branch to check a behaviour, know that it cannot localise as it ships.** With the `map_scan_method` its own configuration file selects, the caster it casts every ray into is built by a constructor that is handed a bare pixel buffer carrying no dimensions and assigns neither the width nor the height it then bounds its loops by, so it cannot build a grid corresponding to the map. The other route into that constructor, from a file, is worse: it reads the dimensions correctly and then discards the object that would have held the grid. The alternative scanner the same parameter offers does not use that code at all and works, so the branch ships misconfigured rather than incapable, and the difference is one value in one file.
+**That branch has moved, and which commit you check a behaviour against now matters.** Between 1 July 2024 and 25 February 2026 it could not localise with the configuration it shipped, and its tip has since been repaired. So there are three states worth telling apart:
 
-Two commits of 1 and 2 July 2024 put it there and it has had no working configured map path since. The commit before them, `fb9dab1` of 15 May 2024, is the last state that runs, and its own sources had stood unchanged for 208 days by then. Its caster is byte identical to the code the published experiments were run with. If you need the old behaviour for comparison, that is the commit to use.
+| State | What it does |
+| --- | --- |
+| the current tip of `kinetic-devel` | five defects repaired, and it localises. This is what a reader should compare against unless they want the history |
+| `49bf545` of 25 February 2026 and back to 2 July 2024 | cannot cast a ray with the `map_scan_method` its own configuration selects, so it cannot localise as it ships. The alternative scanner that parameter offers avoids the broken code entirely and works, so those states ship misconfigured rather than incapable, and the difference is one value in one file |
+| `fb9dab1` of 15 May 2024 | the last state before the faults. Its caster is byte identical to the code the published experiments were run with, and its own sources had stood unchanged for 208 days by then. This is the commit to use for a comparison against the published work |
 
-A second fault is independent of the configuration: the map callback declares a stack array of four bytes per cell, so any building-sized map at a normal resolution overflows an ordinary stack before the node does anything at all.
+The repairs to the tip were the split caster constructor, a conversion buffer sized on the stack from the map, the hypothesis sampling interval, the map origin's dropped orientation and a grid cast that never subtracted the origin. Two of those bore on maps away from the world origin, which the ROS 2 version handles and those older states did not.
+
+**One behaviour to know about if you compare figures.** A figure measured on a state in that window says nothing about the current tip, and one measured on the tip says nothing about that window. Neither substitutes for the other, and whichever is quoted has to name the state it came from.
 
 **Renamed or moved**
 

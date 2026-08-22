@@ -55,6 +55,10 @@ namespace cbgl
  * be seconds later, because a caller asking for a global answer is asking for
  * exactly that. A second call arriving while one is under way is refused rather
  * than queued.
+ * The map reaches it one of two ways, chosen once at start up: on a topic, or
+ * from a map description file on disk. A file is read before anything else this
+ * node owns exists, so a node configured that way either comes up holding its
+ * map or does not come up at all, and it subscribes to no map topic whatsoever.
  */
 class Interface : public rclcpp::Node
 {
@@ -122,6 +126,17 @@ private:
    */
   std::expected<Pose, std::string> sensorOnRobot(
     const std::string& sensor_frame_id, const rclcpp::Time& stamp) const;
+
+  /**
+   * @brief Take a map as the one this node localises in, or say why it cannot
+   * be taken.
+   * @details The one place a map becomes a localiser, whether it arrived on the
+   * topic or was read from a file at start up. The two sources cannot diverge
+   * because there is nothing for them to diverge in.
+   * @return an empty string where the map was taken, otherwise a sentence
+   * naming what about it was refused.
+   */
+  std::string takeMap(const nav_msgs::msg::OccupancyGrid& map);
 
   rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr map_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_subscription_;

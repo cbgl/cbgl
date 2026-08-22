@@ -171,6 +171,8 @@ std::vector<Setting> everySetting()
       .value = rclcpp::ParameterValue(std::string("/scan"))},
     Setting{.name = "map_topic",
       .value = rclcpp::ParameterValue(std::string("/map"))},
+    Setting{.name = "map_file",
+      .value = rclcpp::ParameterValue(std::string(""))},
     Setting{.name = "output_pose_topic",
       .value = rclcpp::ParameterValue(std::string("/initialpose"))},
     Setting{.name = "hypotheses_topic",
