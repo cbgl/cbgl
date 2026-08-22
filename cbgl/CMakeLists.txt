@@ -128,15 +128,27 @@ if(BUILD_TESTING)
 
   find_package(ament_cmake_gtest REQUIRED)
 
+  # The refinement is compiled into this object library rather than linked in
+  # as the shared one. The shared one carries the package's default fast
+  # arithmetic, so a test that asks two builds to agree bit for bit would
+  # otherwise have one translation unit in the middle of it where the compiler
+  # may reassociate and contract: the scan conversion, the settings copy and the
+  # composition of the solver's answer onto the estimate. The solver underneath
+  # is a separate library built once and not by these options, so that one file
+  # is the whole of the gap and compiling it here closes it.
+  # It is a source of this library rather than a second object library because
+  # the objects of an object library reach an executable only where that
+  # executable links it directly, and what the tests link is this one.
   add_library(cbgl_core_exact OBJECT
-    src/cbgl/cbgl.cpp)
+    src/cbgl/cbgl.cpp
+    src/cbgl/icp_refinement.cpp)
 
   target_include_directories(cbgl_core_exact PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
-  target_link_libraries(cbgl_core_exact PUBLIC
-    cbgl_icp_refinement
-    fsm_localisation::fsm_localisation_core)
+  target_link_libraries(cbgl_core_exact
+    PUBLIC fsm_localisation::fsm_localisation_core
+    PRIVATE PkgConfig::CSM)
 
   target_compile_options(cbgl_core_exact PUBLIC
     -O2 -fno-fast-math -ffp-contract=off)

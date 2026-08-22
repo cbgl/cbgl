@@ -55,6 +55,7 @@ up only when broadcasting, and composed every cast with an uninitialised
 transform otherwise.
 """
 
+import math
 import unittest
 
 from cbgl_test_support import (
@@ -91,6 +92,11 @@ AGEING_POSE_TOPIC = '/ageing/pose'
 AGEING_SCAN_TOPIC = '/ageing/scan'
 
 BROADCASTING_POSE_TOPIC = '/broadcasting/pose'
+
+NARROW_MAP_TOPIC = '/narrow/map'
+NARROW_POSE_TOPIC = '/narrow/pose'
+NARROW_RAYS = 270
+NARROW_SCAN_TOPIC = '/narrow/scan'
 
 BUFFER_HISTORY = 10.0
 
@@ -137,12 +143,29 @@ def generate_test_description():
             output_pose_topic=AGEING_POSE_TOPIC,
             dl=150.0, top_k_caers=500, num_threads=1)],
     )
+    # A sensor that does not see all the way round. It refines by the point to
+    # line solver because the panoramic matcher matches a full turn against a
+    # full turn and has nothing to say about three quarters of one, and it
+    # takes every ray it is handed rather than a fixed count, because a fixed
+    # count of a full turn's length would refuse this scan as too short.
+    narrow = launch_ros.actions.Node(
+        package='cbgl',
+        executable='cbgl_interface_node',
+        name='cbgl_narrow',
+        output='screen',
+        parameters=[node_parameters(
+            refinement_method='icp',
+            size_scan=0,
+            map_topic=NARROW_MAP_TOPIC,
+            scan_topic=NARROW_SCAN_TOPIC,
+            output_pose_topic=NARROW_POSE_TOPIC)],
+    )
     return (
         launch.LaunchDescription(
-            [quiet, broadcasting, ageing, keep_alive(),
+            [quiet, broadcasting, ageing, narrow, keep_alive(),
              launch_testing.actions.ReadyToTest()]),
         {'cbgl': quiet, 'cbgl_broadcasting': broadcasting,
-         'cbgl_ageing': ageing},
+         'cbgl_ageing': ageing, 'cbgl_narrow': narrow},
     )
 
 
@@ -170,6 +193,10 @@ class TestNodeBehaviour(unittest.TestCase):
                              output_pose_topic=AGEING_POSE_TOPIC,
                              map_topic=AGEING_MAP_TOPIC,
                              scan_topic=AGEING_SCAN_TOPIC)
+        cls.narrow = Harness(node_name='cbgl_narrow',
+                             output_pose_topic=NARROW_POSE_TOPIC,
+                             map_topic=NARROW_MAP_TOPIC,
+                             scan_topic=NARROW_SCAN_TOPIC)
 
         cls.ageing.wait_for_connection()
         cls.harness.wait_for_connection(subscribers=2)
@@ -188,6 +215,7 @@ class TestNodeBehaviour(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        cls.narrow.destroy_node()
         cls.ageing.destroy_node()
         cls.broadcasting.destroy_node()
         cls.harness.destroy_node()
@@ -223,6 +251,76 @@ class TestNodeBehaviour(unittest.TestCase):
             msg='the robot faces %.4f radians and the node reported %.4f. The '
                 'bound is %g cells seen at the mean range this scan carries'
                 % (self.expected[2], yaw_of(pose.orientation), CELLS))
+
+    def test_8_a_sensor_that_sees_three_quarters_of_a_turn_is_localised(self):
+        """
+        The middle 270 of the 360 rays, at the same spacing, from the same pose.
+
+        This is the case that would have caught a fault this package shipped
+        for a few hours. The algorithm learned to read a narrower sensor and the
+        node was never taught to tell it what aperture the scan carries, so the
+        call took the default of a whole turn and three quarters of a turn of
+        measurement was compared against a whole turn of map. Every trial came
+        back successful, reported no refusals and printed a plausible time, and
+        every answer was wrong by metres.
+
+        Nothing a caller can read said so. The path executed, the service
+        succeeded, the refusal counts were empty. Only a comparison against a
+        pose that is known catches it, which is why this asserts the answer
+        rather than the absence of a failure.
+
+        The window is taken from the panoramic scan the other cases use rather
+        than cast afresh, so the two are the same measurement seen through two
+        apertures and this case cannot pass by being an easier scan.
+        """
+        prefix = (len(self.scan) - NARROW_RAYS) // 2
+        window = self.scan[prefix:prefix + NARROW_RAYS]
+        increment = 2.0 * math.pi / len(self.scan)
+
+        self.assertEqual(len(window), NARROW_RAYS)
+
+        self.narrow.wait_for_connection()
+        self.narrow.publish_map(self.grid)
+        self.narrow.spin(1.0)
+        self.narrow.publish_scan(
+            window,
+            first_ray_angle=-0.5 * NARROW_RAYS * increment,
+            increment=increment)
+        self.narrow.spin(0.5)
+
+        response = self.narrow.call()
+        self.narrow.spin(1.0)
+
+        self.assertTrue(response.success, response.message)
+        self.assertEqual(
+            len(self.narrow.poses), 1,
+            'the call published %d poses where one was asked for'
+            % len(self.narrow.poses))
+
+        pose = self.narrow.poses[0].pose.pose
+        tolerance = CELLS * self.grid.resolution
+
+        self.assertAlmostEqual(
+            pose.position.x, self.expected[0], delta=tolerance,
+            msg='a sensor covering three quarters of a turn, at the pose the '
+                'panoramic scan was cast from, put the robot at (%.4f, %.4f) '
+                'where it stands at (%.4f, %.4f). The bound is %g cells of %g '
+                'metres. An answer this far out is what an aperture read as a '
+                'whole turn produces: the map is compared over a turn and the '
+                'measurement covers three quarters of one, so the two are '
+                'aligned nowhere.'
+                % (pose.position.x, pose.position.y,
+                   self.expected[0], self.expected[1],
+                   CELLS, self.grid.resolution))
+        self.assertAlmostEqual(pose.position.y, self.expected[1],
+                               delta=tolerance)
+
+        self.assertAlmostEqual(
+            wrap(yaw_of(pose.orientation) - self.expected[2]), 0.0,
+            delta=heading_tolerance(window, self.grid.resolution, CELLS),
+            msg='the robot faces %.4f radians and the node reported %.4f from '
+                'a scan covering three quarters of a turn'
+                % (self.expected[2], yaw_of(pose.orientation)))
 
     def test_2_the_answer_is_stamped_from_the_scan_that_produced_it(self):
         stamp = self.answer().header.stamp

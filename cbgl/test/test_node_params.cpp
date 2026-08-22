@@ -539,14 +539,6 @@ TEST(NodeParameters, EverySettingIsDeclaredWithItsDocumentedDefault)
 }
 
 /**
- * @brief Nothing is declared that no documentation of this package mentions.
- * @details Every name the node declares has to be either a setting of this
- * package, documented alongside the rest, or one of the six `rclcpp` gives every
- * node whether it is wanted or not. That second list is fixed and exhaustive, so
- * one name of the node's own beyond its documented settings still turns this
- * red, which is the whole point of the case.
- */
-/**
  * @brief The other refinement's settings are declared only where it is chosen.
  * @details A node that declared all twenty six whatever it was going to refine
  * with would accept a configuration setting them and then refine by the matcher
@@ -571,6 +563,14 @@ TEST(NodeParameters, NoIcpSettingIsDeclaredWhereTheMatcherRefines)
       << "accepted and would change nothing.";
 }
 
+/**
+ * @brief Nothing is declared that no documentation of this package mentions.
+ * @details Every name the node declares has to be either a setting of this
+ * package, documented alongside the rest, or one of the six `rclcpp` gives every
+ * node whether it is wanted or not. That second list is fixed and exhaustive, so
+ * one name of the node's own beyond its documented settings still turns this
+ * red, which is the whole point of the case.
+ */
 TEST(NodeParameters, NoSettingIsDeclaredThatIsNotDocumented)
 {
   std::shared_ptr<Interface> node;

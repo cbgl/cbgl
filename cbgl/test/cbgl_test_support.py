@@ -114,23 +114,30 @@ def build_map(stamp, grid, frame_id=GLOBAL_FRAME):
 
 
 def build_scan(stamp, ranges, frame_id=SENSOR_FRAME,
-               first_ray_angle=FIRST_RAY_ANGLE):
+               first_ray_angle=FIRST_RAY_ANGLE, increment=None):
     """
-    Return a panoramic scan of the given ranges, stamped as asked.
+    Return a scan of the given ranges, stamped as asked.
 
-    The rays span exactly one turn and ray zero sits at first_ray_angle, which
-    defaults to minus pi because that is where the matcher's own ray contract
-    puts it. A scan spanning one turn from anywhere else is a legal scan and a
-    different scan, and giving that angle is how a test says so on purpose.
+    Panoramic by default: the rays span exactly one turn and ray zero sits at
+    first_ray_angle, which defaults to minus pi because that is where the
+    matcher's own ray contract puts it. A scan spanning one turn from anywhere
+    else is a legal scan and a different scan, and giving that angle is how a
+    test says so on purpose.
+
+    Give increment to build a narrower scan instead. The rays then span
+    len(ranges) * increment, which is what the node reads the aperture off, and
+    first_ray_angle has to be half of that behind the heading or the node
+    refuses the scan rather than answering it wrongly.
     """
     size = len(ranges)
-    increment = 2.0 * math.pi / size
+    if increment is None:
+        increment = 2.0 * math.pi / size
 
     scan = LaserScan()
     scan.header.stamp.sec, scan.header.stamp.nanosec = stamp
     scan.header.frame_id = frame_id
     scan.angle_min = first_ray_angle
-    scan.angle_max = first_ray_angle + 2.0 * math.pi - increment
+    scan.angle_max = first_ray_angle + (size - 1) * increment
     scan.angle_increment = increment
     scan.time_increment = 0.0
     scan.scan_time = 0.1
@@ -583,10 +590,10 @@ class Harness(Node):
         self.publish_transform(ODOM_FRAME, ROBOT_FRAME, placement)
 
     def publish_scan(self, ranges, stamp=SCAN_STAMP, frame_id=SENSOR_FRAME,
-                     first_ray_angle=FIRST_RAY_ANGLE):
+                     first_ray_angle=FIRST_RAY_ANGLE, increment=None):
         """Send one scan to the node."""
         self.scan_publisher.publish(
-            build_scan(stamp, ranges, frame_id, first_ray_angle))
+            build_scan(stamp, ranges, frame_id, first_ray_angle, increment))
 
     def publish_sensor_placement(self, placement=SENSOR_ON_ROBOT):
         """Put where the sensor sits on the robot into the transform tree."""

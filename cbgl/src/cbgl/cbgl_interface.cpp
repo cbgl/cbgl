@@ -885,8 +885,15 @@ void Interface::localiseOnce(std_srvs::srv::Trigger::Response& outcome)
   const std::vector<double> ranges(scan->ranges.begin(), scan->ranges.end());
   const std::vector<Pose> hypotheses = localiser->disperse();
 
-  const std::expected<Result, Error> result =
-    localiser->localise(ranges, scan->range_min, scan->range_max, hypotheses);
+  /* How much of a turn the scan covers, taken from the scan itself rather than
+   * assumed. `anglesProblemOf` has already refused anything this cannot be
+   * read off honestly: a spacing that is not one, a span wider than a turn, or
+   * a first ray that does not sit half the span behind the heading. */
+  const double aperture =
+    static_cast<double>(scan->ranges.size()) * scan->angle_increment;
+
+  const std::expected<Result, Error> result = localiser->localise(
+    ranges, scan->range_min, scan->range_max, hypotheses, aperture);
 
   if (!result.has_value())
   {
