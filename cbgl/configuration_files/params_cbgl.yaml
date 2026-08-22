@@ -7,6 +7,10 @@ tf_broadcast: true
 
 # input topics
 map_topic: "/map"
+# Path to a map description YAML, in map_server format. Read once at start
+# up and used only when map_topic is empty; leave map_topic set to consume
+# a map from a topic instead, which is the default.
+map_file: ""
 scan_topic: "/scan"
 
 # output topics

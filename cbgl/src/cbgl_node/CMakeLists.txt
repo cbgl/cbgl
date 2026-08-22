@@ -9,6 +9,7 @@ add_library(cbgl_lodepng_lib
 include_directories(include
   ${catkin_INCLUDE_DIRS}
   ${csm_INCLUDE_DIRS}
+  ${YAML_CPP_INCLUDE_DIR}
   /usr/include/pcl-1.7/
   /usr/include/eigen3/
 )
@@ -19,6 +20,7 @@ target_link_libraries(cbgl_lib
   cbgl_lodepng_lib
   ${catkin_LIBRARIES}
   ${csm_LIBRARIES}
+  ${YAML_CPP_LIBRARIES}
   cbgl_og_utils_lib
   cbgl_pf_utils_lib)
 

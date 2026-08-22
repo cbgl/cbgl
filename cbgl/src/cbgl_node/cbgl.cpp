@@ -8,7 +8,59 @@
  */
 #include <cbgl_node/cbgl.h>
 
+#include <cctype>
+#include <cstdint>
+#include <cstring>
+#include <fstream>
+#include <stdexcept>
+#include <string>
+#include <yaml-cpp/yaml.h>
+
 #define DEBUG_EXECUTION_TIMES 0
+
+namespace
+{
+
+/** @brief The largest width or height this reads from a map image, and the
+ *  largest number of cells such an image may declare.
+ *  @details A PGM header states its own dimensions, and nothing in the file
+ *  obliges them to describe the bytes that follow. Sizing a buffer from an
+ *  unbounded header is how a mistyped digit becomes an allocation of gigabytes
+ *  or, once two such numbers are multiplied in a narrow type, an index that
+ *  walks outside every buffer in the function. Both are bounded here instead.
+ *  A hundred thousand cells on a side is far past any occupancy grid a robot
+ *  carries, and the cell ceiling is roughly a hundred times the largest grid
+ *  this package has ever been driven over. */
+const uint64_t kMaxPGMDimension = 100000;
+const uint64_t kMaxPGMCells = 600000000;
+
+/** @brief The largest map image this reads, in bytes. Two bytes a cell at the
+ *  cell ceiling above, which is more than any occupancy grid a robot carries
+ *  and small enough that refusing a larger one costs nobody anything. */
+const uint64_t kMaxPGMBytes = 1200000000;
+
+/** @brief Whether a double is finite, written so that fast maths cannot fold
+ *  it away.
+ *  @details This package compiles with `-Ofast`, which implies
+ *  `-ffinite-math-only`, which tells the compiler that no infinity and no
+ *  quiet NaN can occur. Under that promise `std::isfinite` is a constant true
+ *  and the guards built on it vanish entirely, so a NaN read out of a map
+ *  description reaches the arithmetic that places every hypothesis. The cell
+ *  index it then produces is refused for every draw and the dispersal loop
+ *  never ends. Comparing the bits instead asks a question the optimiser is not
+ *  permitted to answer in advance.
+ *  @remark Do not replace this with `std::isfinite`, however tempting: it is
+ *  correct only in a build that does not set `-ffast-math` or `-Ofast`, and
+ *  this one does. */
+bool isFiniteUnderFastMaths(const double value)
+{
+  uint64_t bits = 0;
+  std::memcpy(&bits, &value, sizeof(bits));
+  const uint64_t exponent = (bits >> 52) & 0x7FF;
+  return exponent != 0x7FF;
+}
+
+}  // namespace
 
 /*******************************************************************************
  * @brief Constructor
@@ -92,9 +144,26 @@ CBGL::CBGL(
 
   /* subscribers */
 
-  /* This is the map */
-  map_subscriber_ = nh_.subscribe(map_topic_, 1,
-    &CBGL::mapCallback, this);
+  /*
+   * The map arrives either from a topic or, read once here, from a map
+   * description file on disk; map_topic wins when both are configured, so
+   * that the two sources can never be mixed mid-run
+   */
+  if (!map_topic_.empty())
+  {
+    if (!map_file_.empty())
+      ROS_WARN(
+        "[%s] Both map_topic and map_file are set; subscribing to "
+        "map_topic and ignoring map_file", PKG_NAME.c_str());
+
+    map_subscriber_ = nh_.subscribe(map_topic_, 1,
+      &CBGL::mapCallback, this);
+  }
+  else if (!map_file_.empty())
+    mapCallback(loadMapFromFile(map_file_));
+  else
+    throw std::runtime_error(
+      "[" + PKG_NAME + "] One of map_topic or map_file is required");
 
   /* This is the scan subscriber */
   scan_subscriber_ = nh_.subscribe(scan_topic_, 1,
@@ -739,6 +808,11 @@ CBGL::initParams()
     map_topic_ = "/map";
     ROS_ERROR("[%s] map_topic", PKG_NAME.c_str());
   }
+  if (!nh_private_.getParam("map_file", map_file_))
+  {
+    map_file_ = "";
+    ROS_ERROR("[%s] map_file", PKG_NAME.c_str());
+  }
   if (!nh_private_.getParam("output_pose_topic", output_pose_topic_))
   {
     output_pose_topic_ = "/initialpose";
@@ -1367,6 +1441,197 @@ CBGL::ldpTolaserScan(const LDP& ldp)
 }
 
 /*******************************************************************************
+ * @details Understands the map_server YAML format: `image`, `resolution`
+ * and `origin` are required; `negate`, `occupied_thresh` and `free_thresh`
+ * fall back to the map_server defaults when absent. A relative `image` path
+ * resolves against the directory the YAML file itself lives in, not the
+ * process' working directory. Only the PGM image format is decoded, in
+ * both its `P2` and `P5` variants: the ROS 2 build of this package carries
+ * no image decoder of its own, and the two builds must accept the same
+ * maps, so PGM, the format `map_saver` writes by default, is the common
+ * ground. Any missing required key, unreadable file, or malformed value
+ * throws `std::runtime_error` naming the key and the file.
+ */
+  nav_msgs::OccupancyGrid
+CBGL::loadMapFromFile(const std::string& filename)
+{
+  YAML::Node yaml;
+  try
+  {
+    yaml = YAML::LoadFile(filename);
+  }
+  catch (const std::exception& ex)
+  {
+    throw std::runtime_error(
+      "[" + PKG_NAME + "] Could not read map file '" + filename + "': " +
+      ex.what());
+  }
+
+  if (!yaml.IsMap())
+    throw std::runtime_error(
+      "[" + PKG_NAME + "] Map file '" + filename + "' is not a mapping of "
+      "keys to values, so it is not a map description; pointing map_file at "
+      "an image or at any other file does this");
+
+  /* The map server reads `mode` as trinary, scale or raw, and the three give
+   * three different maps from one picture. This reads trinary. A description
+   * asking for either of the others is refused rather than quietly given the
+   * one it did not ask for. */
+  if (yaml["mode"])
+  {
+    std::string mode;
+    try
+    {
+      mode = yaml["mode"].as<std::string>();
+    }
+    catch (const std::exception& ex)
+    {
+      throw std::runtime_error(
+        "[" + PKG_NAME + "] Key 'mode' in '" + filename + "' is malformed: " +
+        ex.what());
+    }
+    if (mode != "trinary")
+      throw std::runtime_error(
+        "[" + PKG_NAME + "] Key 'mode' in '" + filename + "' asks for '" +
+        mode + "', and this reads 'trinary' only");
+  }
+
+  if (!yaml["image"])
+    throw std::runtime_error(
+      "[" + PKG_NAME + "] Map file '" + filename + "' is missing key 'image'");
+  if (!yaml["resolution"])
+    throw std::runtime_error(
+      "[" + PKG_NAME + "] Map file '" + filename +
+      "' is missing key 'resolution'");
+  if (!yaml["origin"])
+    throw std::runtime_error(
+      "[" + PKG_NAME + "] Map file '" + filename + "' is missing key 'origin'");
+
+  std::string image_key;
+  double resolution = 0.0;
+  std::vector<double> origin;
+  double negate = 0.0;
+  double occupied_thresh = 0.65;
+  double free_thresh = 0.196;
+
+  try
+  {
+    image_key = yaml["image"].as<std::string>();
+  }
+  catch (const std::exception& ex)
+  {
+    throw std::runtime_error(
+      "[" + PKG_NAME + "] Key 'image' in '" + filename + "' is malformed: " +
+      ex.what());
+  }
+  try
+  {
+    resolution = yaml["resolution"].as<double>();
+  }
+  catch (const std::exception& ex)
+  {
+    throw std::runtime_error(
+      "[" + PKG_NAME + "] Key 'resolution' in '" + filename +
+      "' is malformed: " + ex.what());
+  }
+  if (!isFiniteUnderFastMaths(resolution) || resolution <= 0.0 ||
+    resolution > 1000.0)
+    throw std::runtime_error(
+      "[" + PKG_NAME + "] Key 'resolution' in '" + filename +
+      "' must be a finite number greater than zero and no more than 1000, "
+      "and it is " + std::to_string(resolution) + " metres a cell");
+  try
+  {
+    origin = yaml["origin"].as<std::vector<double> >();
+  }
+  catch (const std::exception& ex)
+  {
+    throw std::runtime_error(
+      "[" + PKG_NAME + "] Key 'origin' in '" + filename +
+      "' is malformed: " + ex.what());
+  }
+  if (origin.size() != 3)
+    throw std::runtime_error(
+      "[" + PKG_NAME + "] Key 'origin' in '" + filename +
+      "' must have exactly three elements");
+  for (const double& element : origin)
+  {
+    if (!isFiniteUnderFastMaths(element))
+      throw std::runtime_error(
+        "[" + PKG_NAME + "] Key 'origin' in '" + filename +
+        "' must contain only finite numbers");
+  }
+
+  try
+  {
+    if (yaml["negate"])
+      negate = yaml["negate"].as<double>();
+    if (yaml["occupied_thresh"])
+      occupied_thresh = yaml["occupied_thresh"].as<double>();
+    if (yaml["free_thresh"])
+      free_thresh = yaml["free_thresh"].as<double>();
+  }
+  catch (const std::exception& ex)
+  {
+    throw std::runtime_error(
+      "[" + PKG_NAME + "] An optional key in '" + filename +
+      "' is malformed: " + ex.what());
+  }
+
+  std::string image_path = image_key;
+  if (!image_path.empty() && image_path.front() != '/')
+  {
+    const size_t slash = filename.find_last_of('/');
+    const std::string dir =
+      (slash == std::string::npos) ? "." : filename.substr(0, slash);
+    image_path = dir + "/" + image_key;
+  }
+
+  unsigned int width = 0;
+  unsigned int height = 0;
+  std::vector<unsigned char> pixels;
+  readPGM(image_path, &width, &height, &pixels);
+
+  nav_msgs::OccupancyGrid map_msg;
+  map_msg.header.frame_id = fixed_frame_id_;
+  map_msg.info.resolution = resolution;
+  map_msg.info.width = width;
+  map_msg.info.height = height;
+  map_msg.info.origin.position.x = origin[0];
+  map_msg.info.origin.position.y = origin[1];
+  map_msg.info.origin.position.z = 0.0;
+
+  tf::Quaternion q;
+  q.setRPY(0.0, 0.0, origin[2]);
+  q.normalize();
+  tf::quaternionTFToMsg(q, map_msg.info.origin.orientation);
+
+  /* A PGM's first row is the top of the image; an occupancy grid's first
+   * row is the one at the origin, i.e. the bottom, so rows are read back
+   * to front, exactly as the map server itself does */
+  map_msg.data.resize(width * height);
+  for (unsigned int row = 0; row < height; row++)
+  {
+    const unsigned int src_row = height - 1 - row;
+    for (unsigned int col = 0; col < width; col++)
+    {
+      const unsigned char value = pixels[src_row * width + col];
+      const double shade = (negate != 0.0) ?
+        value / 255.0 : (255 - value) / 255.0;
+
+      if (shade > occupied_thresh)
+        map_msg.data[row * width + col] = 100;
+      else if (shade < free_thresh)
+        map_msg.data[row * width + col] = 0;
+      else
+        map_msg.data[row * width + col] = -1;
+    }
+  }
+
+  return map_msg;
+}
+
+/*******************************************************************************
  * @brief Stores the map upon receipt. (The map does not change through time)
  * @param[in] map_msg [const nav_msgs::OccupancyGrid] The map
  * @return void
@@ -1751,6 +2016,226 @@ CBGL::processScan(LDP& world_scan_ldp, LDP& map_scan_ldp,
   /* statistics */
   double dur = (ros::WallTime::now() - start).toSec() * 1e3;
   ROS_DEBUG("[%s] Scan matcher total duration: %.1f ms", PKG_NAME.c_str(), dur);
+}
+
+/*******************************************************************************
+ * @details Supports the two PGM variants, `P2` (ASCII) and `P5` (binary).
+ * Comments starting with `#` are skipped wherever whitespace is allowed, as
+ * the format permits. A sample is rescaled to the [0,255] range when the
+ * file's own maximum value differs from 255, so that callers can always
+ * treat the output as an ordinary 8-bit greyscale image. Rows are returned
+ * in the order they appear in the file, i.e. the first row decoded is the
+ * top of the image; flipping rows so that the map's origin is at the
+ * bottom is the caller's job, not this one's.
+ */
+  void
+CBGL::readPGM(
+  const std::string& filename,
+  unsigned int* width,
+  unsigned int* height,
+  std::vector<unsigned char>* pixels)
+{
+  /* What the path names is established before it is opened. An `image` key
+   * naming a character device reads until the memory runs out; one naming a
+   * pipe blocks here forever, and a node that never finishes starting and
+   * never says why is the worst of the outcomes available. Both are ruled out
+   * by insisting on an ordinary file of a sane size. */
+  struct stat image_stat;
+  if (stat(filename.c_str(), &image_stat) != 0)
+    throw std::runtime_error(
+      "[" + PKG_NAME + "] Could not read image file '" + filename + "'");
+  if (!S_ISREG(image_stat.st_mode))
+    throw std::runtime_error(
+      "[" + PKG_NAME + "] Image file '" + filename + "' is not an ordinary "
+      "file, and this reads a PGM from a file rather than from a device or a "
+      "pipe");
+  const uint64_t image_bytes = static_cast<uint64_t>(image_stat.st_size);
+  if (image_bytes > kMaxPGMBytes)
+    throw std::runtime_error(
+      "[" + PKG_NAME + "] Image file '" + filename + "' is " +
+      std::to_string(image_bytes) + " bytes, above the largest this reads, " +
+      std::to_string(kMaxPGMBytes));
+
+  std::ifstream file(filename.c_str(), std::ios::binary);
+  if (!file)
+    throw std::runtime_error(
+      "[" + PKG_NAME + "] Could not open image file '" + filename + "'");
+
+  auto skip_ignorable = [&file]()
+  {
+    for (;;)
+    {
+      const int c = file.peek();
+      if (c == '#')
+      {
+        std::string line;
+        std::getline(file, line);
+      }
+      else if (std::isspace(c))
+        file.get();
+      else
+        break;
+    }
+  };
+
+  auto next_token = [&file, &skip_ignorable]() -> std::string
+  {
+    skip_ignorable();
+    std::string token;
+    file >> token;
+    return token;
+  };
+
+  const std::string magic = next_token();
+  if (magic != "P2" && magic != "P5")
+    throw std::runtime_error(
+      "[" + PKG_NAME + "] Image file '" + filename +
+      "' is not a PGM file of either the 'P2' or 'P5' variant");
+
+  /* Every header number is read as a 64 bit value and bounded before it is
+   * used to size anything. `std::stoul` alone is not enough on two counts: it
+   * accepts a leading minus, so a header of `-1` becomes the largest unsigned
+   * value, and it stops at the first character it cannot use, so `100abc`
+   * reads as 100 with nothing said. Narrowing such a value into an `unsigned
+   * int` and then multiplying two of them wraps, which sizes a buffer at one
+   * element for an image the loops below then walk across the whole index
+   * range. */
+  auto header_number = [&filename, this](const std::string& token,
+    const std::string& what) -> uint64_t
+  {
+    if (token.empty() || token.find_first_not_of("0123456789") !=
+      std::string::npos)
+      throw std::runtime_error(
+        "[" + PKG_NAME + "] Image file '" + filename + "' declares a " + what +
+        " of '" + token + "', which is not a whole number");
+
+    uint64_t value = 0;
+    for (size_t i = 0; i < token.size(); i++)
+    {
+      value = value * 10 + static_cast<uint64_t>(token[i] - '0');
+      if (value > kMaxPGMDimension)
+        throw std::runtime_error(
+          "[" + PKG_NAME + "] Image file '" + filename + "' declares a " +
+          what + " above the largest this reads, " +
+          std::to_string(kMaxPGMDimension));
+    }
+    return value;
+  };
+
+  const uint64_t w64 = header_number(next_token(), "width");
+  const uint64_t h64 = header_number(next_token(), "height");
+  const uint64_t maxval64 = header_number(next_token(), "maxval");
+
+  if (w64 == 0 || h64 == 0)
+    throw std::runtime_error(
+      "[" + PKG_NAME + "] Image file '" + filename + "' declares a size of " +
+      std::to_string(w64) + " by " + std::to_string(h64) +
+      ", and an image with no cell describes no map");
+  if (maxval64 == 0 || maxval64 > 65535)
+    throw std::runtime_error(
+      "[" + PKG_NAME + "] Image file '" + filename + "' declares a maxval of " +
+      std::to_string(maxval64) + ", and a PGM's is between 1 and 65535");
+
+  /* The product is taken in 64 bits and bounded before anything is sized from
+   * it, so that neither it nor the byte count below can wrap. */
+  const uint64_t cells = w64 * h64;
+  if (cells > kMaxPGMCells)
+    throw std::runtime_error(
+      "[" + PKG_NAME + "] Image file '" + filename + "' declares " +
+      std::to_string(cells) + " cells, above the largest this reads, " +
+      std::to_string(kMaxPGMCells));
+
+  /* The declared size is measured against the bytes the file actually holds
+   * before a byte is allocated from it. A header claiming a size the file
+   * cannot carry would otherwise commit gigabytes, touch every page of them,
+   * and be refused afterwards, which on a robot is the memory killer rather
+   * than a message. A binary sample takes at least one byte and a text one at
+   * least two counting its separator, so both give a floor. */
+  const uint64_t bytes_left = image_bytes -
+    std::min<uint64_t>(image_bytes, static_cast<uint64_t>(file.tellg()));
+  const uint64_t bytes_needed = (magic == "P5")
+    ? cells * ((maxval64 < 256) ? 1 : 2) : cells * 2;
+  if (bytes_needed > bytes_left)
+    throw std::runtime_error(
+      "[" + PKG_NAME + "] Image file '" + filename + "' declares " +
+      std::to_string(cells) + " cells, which need at least " +
+      std::to_string(bytes_needed) + " bytes, and carries " +
+      std::to_string(bytes_left) + " after its header");
+
+  const unsigned int w = static_cast<unsigned int>(w64);
+  const unsigned int h = static_cast<unsigned int>(h64);
+  const unsigned int maxval = static_cast<unsigned int>(maxval64);
+
+  std::vector<unsigned int> raw(static_cast<size_t>(cells));
+
+  if (magic == "P2")
+  {
+    for (unsigned int i = 0; i < w * h; i++)
+    {
+      try
+      {
+        raw[i] = std::stoul(next_token());
+      }
+      catch (const std::exception& ex)
+      {
+        throw std::runtime_error(
+          "[" + PKG_NAME + "] Image file '" + filename +
+          "' ends before its declared size");
+      }
+      if (raw[i] > maxval)
+        throw std::runtime_error(
+          "[" + PKG_NAME + "] Image file '" + filename + "' has a sample of "
+          + std::to_string(raw[i]) + " above its declared maxval of " +
+          std::to_string(maxval));
+    }
+  }
+  else  /* P5 */
+  {
+    /* Exactly one whitespace character separates the header from the raw
+     * data. A file that carries two, which is what a CRLF separator gives and
+     * what any pass through a Windows editor produces, would otherwise put
+     * that second byte in as the first sample and shift every pixel of the
+     * image by one, with the truncation check below still satisfied because
+     * the file holds one byte more than it needs. That is a map wrong
+     * everywhere and silent, so the separator is checked rather than
+     * assumed. */
+    const int separator = file.get();
+    if (separator == EOF || !std::isspace(separator))
+      throw std::runtime_error(
+        "[" + PKG_NAME + "] Image file '" + filename + "' does not separate "
+        "its header from its data with a whitespace character");
+    if (separator == '\r' && file.peek() == '\n')
+      file.get();
+
+    const unsigned int bytes_per_sample = (maxval < 256) ? 1 : 2;
+    std::vector<unsigned char> buf(w * h * bytes_per_sample);
+    file.read(reinterpret_cast<char*>(buf.data()), buf.size());
+    if (!file)
+      throw std::runtime_error(
+        "[" + PKG_NAME + "] Image file '" + filename +
+        "' ends before its declared size");
+
+    for (unsigned int i = 0; i < w * h; i++)
+    {
+      if (bytes_per_sample == 1)
+        raw[i] = buf[i];
+      else
+        raw[i] = (static_cast<unsigned int>(buf[2*i]) << 8) | buf[2*i+1];
+
+      if (raw[i] > maxval)
+        throw std::runtime_error(
+          "[" + PKG_NAME + "] Image file '" + filename + "' has a sample of "
+          + std::to_string(raw[i]) + " above its declared maxval of " +
+          std::to_string(maxval));
+    }
+  }
+
+  pixels->resize(w * h);
+  for (unsigned int i = 0; i < w * h; i++)
+    (*pixels)[i] = static_cast<unsigned char>(raw[i] * 255.0 / maxval + 0.5);
+
+  *width = w;
+  *height = h;
 }
 
 /*******************************************************************************

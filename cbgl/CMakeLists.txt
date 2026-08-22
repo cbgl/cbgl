@@ -22,6 +22,9 @@ pkg_check_modules(csm REQUIRED csm)
 # FSM needs CGAL
 find_package(CGAL REQUIRED)
 
+# yaml-cpp for parsing a map description file supplied via map_file
+find_package(yaml-cpp REQUIRED)
+
 
 catkin_package(
   CATKIN_DEPENDS
@@ -35,6 +38,7 @@ catkin_package(
 include_directories(include
   ${catkin_INCLUDE_DIRS}
   ${csm_INCLUDE_DIRS}
+  ${YAML_CPP_INCLUDE_DIR}
   /usr/include/eigen3/
 )
 

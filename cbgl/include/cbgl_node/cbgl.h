@@ -111,6 +111,7 @@ class CBGL
 
     std::string scan_topic_;
     std::string map_topic_;
+    std::string map_file_;
     std::string output_pose_topic_;
     std::string global_localisation_service_name_;
 
@@ -371,6 +372,15 @@ class CBGL
     sensor_msgs::LaserScan::Ptr ldpTolaserScan(const LDP& ldp);
 
     /***************************************************************************
+     * @brief Builds an occupancy grid message from a map description YAML
+     * file and its accompanying image, read once at start up.
+     * @param[in] filename [const std::string&] The path to the map
+     * description YAML file
+     * @return [nav_msgs::OccupancyGrid] The map, in message form
+     */
+    nav_msgs::OccupancyGrid loadMapFromFile(const std::string& filename);
+
+    /***************************************************************************
      * @brief Stores the map upon receipt. (The map does not change through time)
      * @param[in] map_msg [const nav_msgs::OccupancyGrid] The map
      * @return void
@@ -433,6 +443,18 @@ class CBGL
      */
     void processScan(LDP& world_scan_ldp, LDP& map_scan_ldp,
       sm_result* output, tf::Transform* f2b);
+
+    /***************************************************************************
+     * @brief Decodes a PGM image file into an 8-bit greyscale pixel buffer.
+     * @param[in] filename [const std::string&] The path to the PGM file
+     * @param[out] width [unsigned int*] The image's width, in pixels
+     * @param[out] height [unsigned int*] The image's height, in pixels
+     * @param[out] pixels [std::vector<unsigned char>*] The decoded pixels,
+     * one byte per pixel, row-major, top row first
+     * @return void
+     */
+    void readPGM(const std::string& filename, unsigned int* width,
+      unsigned int* height, std::vector<unsigned char>* pixels);
 
     /***************************************************************************
      * For use with FSM
