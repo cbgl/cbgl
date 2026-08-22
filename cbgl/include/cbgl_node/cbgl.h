@@ -378,7 +378,7 @@ class CBGL
      * description YAML file
      * @return [nav_msgs::OccupancyGrid] The map, in message form
      */
-    nav_msgs::OccupancyGrid loadMapFromFile(const std::string& filename);
+    nav_msgs::OccupancyGrid loadMapFromFile(const std::string& filename) const;
 
     /***************************************************************************
      * @brief Stores the map upon receipt. (The map does not change through time)
@@ -454,7 +454,7 @@ class CBGL
      * @return void
      */
     void readPGM(const std::string& filename, unsigned int* width,
-      unsigned int* height, std::vector<unsigned char>* pixels);
+      unsigned int* height, std::vector<unsigned char>* pixels) const;
 
     /***************************************************************************
      * For use with FSM

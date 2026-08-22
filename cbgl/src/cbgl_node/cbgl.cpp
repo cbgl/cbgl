@@ -1453,7 +1453,7 @@ CBGL::ldpTolaserScan(const LDP& ldp)
  * throws `std::runtime_error` naming the key and the file.
  */
   nav_msgs::OccupancyGrid
-CBGL::loadMapFromFile(const std::string& filename)
+CBGL::loadMapFromFile(const std::string& filename) const
 {
   YAML::Node yaml;
   try
@@ -1565,7 +1565,20 @@ CBGL::loadMapFromFile(const std::string& filename)
   try
   {
     if (yaml["negate"])
-      negate = yaml["negate"].as<double>();
+    {
+      /* Read as a number first and as a boolean second. The map server's own
+       * files carry 0 or 1, which is what a number reads, but `negate: false`
+       * is the natural way for a person to write it and refusing that at start
+       * up would be a refusal about spelling rather than about the map. */
+      try
+      {
+        negate = yaml["negate"].as<double>();
+      }
+      catch (const std::exception&)
+      {
+        negate = yaml["negate"].as<bool>() ? 1.0 : 0.0;
+      }
+    }
     if (yaml["occupied_thresh"])
       occupied_thresh = yaml["occupied_thresh"].as<double>();
     if (yaml["free_thresh"])
@@ -2033,7 +2046,7 @@ CBGL::readPGM(
   const std::string& filename,
   unsigned int* width,
   unsigned int* height,
-  std::vector<unsigned char>* pixels)
+  std::vector<unsigned char>* pixels) const
 {
   /* What the path names is established before it is opened. An `image` key
    * naming a character device reads until the memory runs out; one naming a
@@ -2172,16 +2185,16 @@ CBGL::readPGM(
   {
     for (unsigned int i = 0; i < w * h; i++)
     {
-      try
-      {
-        raw[i] = std::stoul(next_token());
-      }
-      catch (const std::exception& ex)
-      {
+      const std::string sample = next_token();
+      if (sample.empty())
         throw std::runtime_error(
           "[" + PKG_NAME + "] Image file '" + filename +
           "' ends before its declared size");
-      }
+      if (sample.find_first_not_of("0123456789") != std::string::npos)
+        throw std::runtime_error(
+          "[" + PKG_NAME + "] Image file '" + filename + "' carries '" +
+          sample + "' where a sample belongs, which is not a whole number");
+      raw[i] = std::stoul(sample);
       if (raw[i] > maxval)
         throw std::runtime_error(
           "[" + PKG_NAME + "] Image file '" + filename + "' has a sample of "
