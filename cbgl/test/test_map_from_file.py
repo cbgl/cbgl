@@ -84,6 +84,10 @@ POSE_TOPIC = '/from_file/pose'
 
 OCCUPANCY_GRID_TYPE = 'nav_msgs/msg/OccupancyGrid'
 
+# The second node of this launch, the one given both settings at once.
+BOTH_NODE_NAME = 'cbgl_map_from_both'
+MAP_TOPIC_FOR_BOTH = '/map_for_both'
+
 DIRECTORY = []
 
 
@@ -102,10 +106,28 @@ def generate_test_description():
         parameters=[node_parameters(map_topic='', map_file=description,
                                     output_pose_topic=POSE_TOPIC)],
     )
+
+    # A second node, given BOTH settings, to pin which of them wins. Nothing
+    # else in the suite sets both, so inverting that rule in the node would
+    # leave every other case green while quietly reversing what an operator
+    # who configured both was promised. This one is never asked to localise;
+    # what it is asked is whether it subscribed, because subscribing is the
+    # observable difference between the two routes.
+    both = launch_ros.actions.Node(
+        package='cbgl',
+        executable='cbgl_interface_node',
+        name=BOTH_NODE_NAME,
+        output='screen',
+        parameters=[node_parameters(map_topic=MAP_TOPIC_FOR_BOTH,
+                                    map_file=description,
+                                    output_pose_topic=POSE_TOPIC)],
+    )
+
     return (
         launch.LaunchDescription(
-            [node, keep_alive(), launch_testing.actions.ReadyToTest()]),
-        {'cbgl_from_file': node},
+            [node, both, keep_alive(),
+             launch_testing.actions.ReadyToTest()]),
+        {'cbgl_from_file': node, 'cbgl_from_both': both},
     )
 
 
@@ -205,6 +227,35 @@ class TestMapFromFile(unittest.TestCase):
             'Whatever arrives there would replace the map that was read, which '
             'is not what an operator who named a file asked for'
             % carrying_a_map)
+
+    def test_4_a_node_given_both_a_topic_and_a_file_takes_the_topic(self):
+        """
+        The other node of this launch, given both settings at once.
+
+        Nothing else in the suite sets both, so the rule deciding between the
+        two routes could be inverted in the node and every other case would
+        stay green while an operator who configured both got the opposite of
+        what is written down. Subscribing is the observable difference between
+        the two routes, so that is what is asked.
+        """
+        try:
+            subscriptions = self.harness.get_subscriber_names_and_types_by_node(
+                BOTH_NODE_NAME, '/')
+        except NodeNameNonExistentError:
+            self.fail('%s is not in the graph. A node given both a topic and a '
+                      'file is meant to come up on the topic, not to refuse'
+                      % BOTH_NODE_NAME)
+
+        carrying_a_map = [name for name, types in subscriptions
+                          if OCCUPANCY_GRID_TYPE in types]
+
+        self.assertEqual(
+            carrying_a_map, [MAP_TOPIC_FOR_BOTH],
+            'a node given both a topic and a file is documented to take the '
+            'topic and ignore the file, so it must subscribe to %r. It '
+            'subscribes to %r instead, which means the rule deciding between '
+            'the two routes is the other way round from what is written down'
+            % (MAP_TOPIC_FOR_BOTH, carrying_a_map))
 
 
 @launch_testing.post_shutdown_test()

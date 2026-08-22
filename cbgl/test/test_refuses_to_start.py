@@ -82,6 +82,8 @@ twice over, would be a page of names before the first assertion. They are the
 same objects the launch description carries.
 """
 
+import os
+import tempfile
 import unittest
 
 from cbgl_test_support import keep_alive, node_parameters
@@ -111,6 +113,8 @@ CASES = {
     'bad_timeout': ({'tf_lookup_timeout': float('inf')},
                     ('tf_lookup_timeout', 'inf')),
     'bad_top_k': ({'top_k_caers': 0}, ('top_k_caers', '0')),
+    'no_free_cell': ({'map_topic': '', 'map_file': None},
+                     ('no free cell',)),
     'no_map_at_all': ({'map_topic': ''}, ('map_topic', 'map_file')),
 }
 
@@ -131,9 +135,39 @@ def cbgl_node(node_name, **overrides):
     )
 
 
+def a_map_with_nowhere_to_stand():
+    """
+    Write a description of a map whose every cell is a wall.
+
+    Its shape is beyond reproach: the right dimensions, the right resolution,
+    an origin that parses. Only its contents make it useless, and nothing about
+    a message's shape can catch that. Before this case existed such a map got
+    the node all the way up and then refused every request against it, for a
+    reason naming neither the map nor the file it came from, which is the
+    outcome this package's own documentation promises not to produce.
+    """
+    directory = tempfile.mkdtemp(prefix='cbgl_no_free_cell_')
+    picture = os.path.join(directory, 'blocked.pgm')
+    description = os.path.join(directory, 'blocked.yaml')
+
+    columns, rows = 4, 3
+
+    with open(picture, 'wb') as handle:
+        handle.write(b'P5\n%d %d\n255\n' % (columns, rows))
+        handle.write(bytes([0] * (columns * rows)))
+
+    with open(description, 'w') as handle:
+        handle.write(
+            'image: blocked.pgm\nresolution: 0.05\norigin: [0.0, 0.0, 0.0]\n')
+
+    return description
+
+
 @pytest.mark.launch_test
 def generate_test_description():
     """Launch one node per refusal, and one that has nothing to refuse."""
+    CASES['no_free_cell'][0]['map_file'] = a_map_with_nowhere_to_stand()
+
     PROCESSES.update({
         name: cbgl_node('cbgl_' + name, **overrides)
         for name, (overrides, _) in CASES.items()

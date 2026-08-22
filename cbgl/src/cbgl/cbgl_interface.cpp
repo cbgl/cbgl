@@ -1063,6 +1063,21 @@ std::string Interface::takeMap(const nav_msgs::msg::OccupancyGrid& map)
   FreeSpace free_space = freeSpaceOf(**built);
   const std::size_t free_cells = free_space.cells.size();
 
+  /* A map with nowhere to stand is refused here rather than at the first
+   * request. The builder judges the message's shape and says nothing about
+   * what is in it, so a grid whose every cell is blocked passes it and the
+   * node comes up looking healthy, only to refuse every request afterwards
+   * for a reason that names neither the map nor where it came from. Refusing
+   * it at the point the map arrives means a start up from a file dies of it
+   * with the file named, which is what this package's own documentation
+   * promises, and a map on a topic is dropped with the same sentence while
+   * whatever map the node already held it keeps. */
+  if (free_cells == 0U)
+  {
+    return "the map carries no free cell, so there is nowhere in it to place "
+      "a hypothesis and no request against it could ever be answered";
+  }
+
   const auto localiser =
     std::make_shared<const Localiser>(parameters_, *built,
       std::move(free_space));

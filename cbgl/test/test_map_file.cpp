@@ -262,6 +262,173 @@ TEST_F(MapFile, ACommentInThePicturesHeaderIsSkipped)
   EXPECT_EQ(map->data, everyCell());
 }
 
+/**
+ * @brief A plain picture that stops before its size is refused, as a binary
+ * one already is.
+ * @details The two variants take separate paths through the decoder and only
+ * the binary one had a case, so a plain picture could have been truncated
+ * silently for as long as nobody wrote this.
+ */
+TEST_F(MapFile, APlainPictureCarryingTooFewSamplesIsRefused)
+{
+  write(kPictureName, std::format("P2\n{} {}\n255\n0 0 0\n", kColumns,
+    kRows));
+
+  const std::filesystem::path description =
+    write(kDescriptionName, everyRequiredKey());
+
+  const std::expected<nav_msgs::msg::OccupancyGrid, std::string> map =
+    mapFromFile(description.string());
+
+  ASSERT_FALSE(map.has_value());
+  EXPECT_NE(map.error().find(kPictureName), std::string::npos) << map.error();
+}
+
+/**
+ * @brief A size no file could carry is refused before anything is sized from
+ * it.
+ * @details A picture states its own dimensions and nothing in it obliges them
+ * to describe what follows. Sizing a buffer from them first turns a mistyped
+ * digit into an allocation of everything the machine has, so the header is
+ * measured against the bytes in hand before a byte is reserved.
+ */
+TEST_F(MapFile, ASizeTheFileCannotCarryIsRefusedRatherThanAllocated)
+{
+  write(kPictureName, std::string("P5\n4294967295 4294967295\n255\nX"));
+
+  const std::filesystem::path description =
+    write(kDescriptionName, everyRequiredKey());
+
+  const std::expected<nav_msgs::msg::OccupancyGrid, std::string> map =
+    mapFromFile(description.string());
+
+  ASSERT_FALSE(map.has_value());
+  EXPECT_NE(map.error().find(kPictureName), std::string::npos) << map.error();
+}
+
+/**
+ * @brief A magic number that is neither variant is refused by name.
+ */
+TEST_F(MapFile, APictureOfAnotherFormatIsRefusedByNamingTheFile)
+{
+  write(kPictureName, std::string("P6\n3 2\n255\nxxxxxxxxxxxxxxxxxx"));
+
+  const std::filesystem::path description =
+    write(kDescriptionName, everyRequiredKey());
+
+  const std::expected<nav_msgs::msg::OccupancyGrid, std::string> map =
+    mapFromFile(description.string());
+
+  ASSERT_FALSE(map.has_value());
+  EXPECT_NE(map.error().find(kPictureName), std::string::npos) << map.error();
+}
+
+/**
+ * @brief A resolution or an origin that is not a finite number is refused by
+ * naming the key.
+ * @details Neither survives contact with the arithmetic that places a pose: a
+ * resolution of nought divides by nought in the cell indexing and a NaN in the
+ * origin poisons every answer the node will ever give, both far from the file
+ * that caused it.
+ */
+TEST_F(MapFile, ANumberThatIsNotFiniteIsRefusedByNamingItsKey)
+{
+  writePicture();
+
+  const std::filesystem::path bad_resolution = write("nan_resolution.yaml",
+    std::format("image: {}\nresolution: .nan\norigin: [{}, {}, {}]\n",
+      kPictureName, kOriginX, kOriginY, kOriginYaw));
+
+  const std::expected<nav_msgs::msg::OccupancyGrid, std::string> by_resolution =
+    mapFromFile(bad_resolution.string());
+
+  ASSERT_FALSE(by_resolution.has_value());
+  EXPECT_NE(by_resolution.error().find("resolution"), std::string::npos)
+    << by_resolution.error();
+
+  const std::filesystem::path bad_origin = write("nan_origin.yaml",
+    std::format("image: {}\nresolution: {}\norigin: [{}, .nan, {}]\n",
+      kPictureName, kResolution, kOriginX, kOriginYaw));
+
+  const std::expected<nav_msgs::msg::OccupancyGrid, std::string> by_origin =
+    mapFromFile(bad_origin.string());
+
+  ASSERT_FALSE(by_origin.has_value());
+  EXPECT_NE(by_origin.error().find("origin"), std::string::npos)
+    << by_origin.error();
+}
+
+/**
+ * @brief A threshold outside nought to one, or the two of them the wrong way
+ * round, is refused by naming the key.
+ * @details These two decide what every cell of the map means. A threshold
+ * above one leaves nothing blocked and a free threshold above the occupied one
+ * leaves no cell unknown, and both are silent.
+ */
+TEST_F(MapFile, AThresholdOutsideItsRangeIsRefusedByNamingItsKey)
+{
+  writePicture();
+
+  const std::filesystem::path too_large = write("large_threshold.yaml",
+    everyRequiredKey() + "occupied_thresh: 2.0\n");
+
+  const std::expected<nav_msgs::msg::OccupancyGrid, std::string> by_range =
+    mapFromFile(too_large.string());
+
+  ASSERT_FALSE(by_range.has_value());
+  EXPECT_NE(by_range.error().find("occupied_thresh"), std::string::npos)
+    << by_range.error();
+
+  const std::filesystem::path inverted = write("inverted_thresholds.yaml",
+    everyRequiredKey() + "occupied_thresh: 0.2\nfree_thresh: 0.8\n");
+
+  const std::expected<nav_msgs::msg::OccupancyGrid, std::string> by_order =
+    mapFromFile(inverted.string());
+
+  ASSERT_FALSE(by_order.has_value());
+  EXPECT_NE(by_order.error().find("free_thresh"), std::string::npos)
+    << by_order.error();
+}
+
+/**
+ * @brief A description asking for a mode this does not read is refused rather
+ * than given the one it did not ask for.
+ * @details The map server reads three modes and they give three different maps
+ * from one picture. This reads trinary.
+ */
+TEST_F(MapFile, AModeThisDoesNotReadIsRefusedByNamingIt)
+{
+  writePicture();
+
+  const std::filesystem::path description = write(kDescriptionName,
+    everyRequiredKey() + "mode: raw\n");
+
+  const std::expected<nav_msgs::msg::OccupancyGrid, std::string> map =
+    mapFromFile(description.string());
+
+  ASSERT_FALSE(map.has_value());
+  EXPECT_NE(map.error().find("raw"), std::string::npos) << map.error();
+}
+
+/**
+ * @brief An image that is not an ordinary file is refused rather than read.
+ * @details A path naming a character device reads until the memory runs out
+ * and one naming a pipe blocks start up for ever, which is a node that never
+ * comes up and never says why.
+ */
+TEST_F(MapFile, AnImageThatIsNotAnOrdinaryFileIsRefused)
+{
+  const std::filesystem::path description = write(kDescriptionName,
+    std::format("image: /dev/zero\nresolution: {}\norigin: [{}, {}, {}]\n",
+      kResolution, kOriginX, kOriginY, kOriginYaw));
+
+  const std::expected<nav_msgs::msg::OccupancyGrid, std::string> map =
+    mapFromFile(description.string());
+
+  ASSERT_FALSE(map.has_value());
+  EXPECT_NE(map.error().find("/dev/zero"), std::string::npos) << map.error();
+}
+
 TEST_F(MapFile, ADescriptionOfNoImageIsRefusedByNamingTheKeyAndTheFile)
 {
   writePicture();
