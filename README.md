@@ -91,19 +91,46 @@ docker compose run --rm cbgl bash
 
 ### From source
 
-`fsm_localisation` must be in the same workspace. Everything else is declared in the manifests and `rosdep` fetches it, bar the one stale rule described below.
+`fsm_localisation` must be in the same workspace. Everything else is declared in the manifests and `rosdep` fetches it, bar two keys described below.
+
+`csm` comes first, because `cbgl` will not configure without it. That is Andrea Censi's canonical scan matcher, which the ICP refinement uses. It has no `rosdep` rule and no release for any ROS 2 distribution, so it is built from source and installed to the system. Clone it outside the workspace: it carries a manifest of its own and `colcon` would otherwise try to build it as a workspace package.
 
 ```sh
 mkdir -p ~/ros2_ws/src && cd ~/ros2_ws/src
 git clone git@github.com:cbgl/cbgl.git
 git clone git@github.com:fourier-scan-matcher/fsm-localisation.git
+
+cd ~
+git clone https://github.com/AndreaCensi/csm.git
+cd csm
+git checkout 04c4a31072e8690bd0ff14de50be20c5b6b43e66
+for p in ~/ros2_ws/src/cbgl/docker/csm_*.patch; do
+  patch -p1 --forward --batch --fuzz=0 < "${p}"
+done
+cmake -S . -B build -DBUILD_SHARED_LIBS=ON -DCMAKE_CXX_FLAGS=-O2 \
+  -DCMAKE_INSTALL_PREFIX=/usr/local
+cmake --build build
+sudo cmake --install build
+sudo rm -f /usr/local/lib/libcsm-static.a
+sudo ldconfig
+
 cd ~/ros2_ws
 sudo apt install libfftw3-dev
-rosdep install --from-paths src --ignore-src -r -y --skip-keys libfftw3
+rosdep install --from-paths src --ignore-src -r -y --skip-keys "libfftw3 csm"
 colcon build --packages-up-to cbgl
 ```
 
-`rosdep` needs `--skip-keys libfftw3`: the key resolves through the upstream rules to a package Ubuntu dropped in favour of one per floating point precision, so install `libfftw3-dev` by name instead.
+`rosdep` needs `libfftw3` skipped because the key resolves through the upstream rules to a package Ubuntu dropped in favour of one per floating point precision, so `libfftw3-dev` is installed by name instead. It needs `csm` skipped because there is no rule for that key at all, and the step above has already installed it.
+
+Every line of the `csm` recipe earns its place, so none of it is optional:
+
+* **The commit is pinned** because the three patches are written against the sources exactly as that commit stands. The branch has not moved since August 2022, so treat the patches as permanent rather than as something upstream will take off your hands.
+* **The three patches** are carried in `docker/`, each with its reasoning at its head. The first is the only one `csm`'s own build refuses to proceed without. The second corrects a write one entry past the end of a buffer inside `csm`, on the code path `do_alpha_test` reaches; leave it out and the refinement corrupts memory the moment that setting is switched on, which the settings the ROS 1 package ships do. The third makes `csm`'s own `pkg-config` file name the shared library rather than the static one.
+* **`BUILD_SHARED_LIBS=ON` is a licensing requirement, not a preference.** `csm` is LGPL v3 and `cbgl` links it dynamically to satisfy that licence's relinking requirement. Without the switch `csm` builds an archive and `-lcsm` resolves to it silently. `cbgl` refuses to configure against a static `csm` rather than let that pass, but being told after the fact is not the point.
+* **The optimisation flag is given on its own** rather than by asking for a release build. `csm`'s build file names no default build type, so without it the whole library compiles unoptimised. A release build would fix that and also define `NDEBUG`, which disarms the assertions guarding `csm`'s own fixed-size pools.
+* **The static archive is removed** after the install because nothing should reach it, deliberately or otherwise.
+
+If you skip the second patch, `colcon test` catches it: the refinement's own tests exercise the settings the ROS 1 package ships, which switch that path on.
 
 Two build options exist for comparing builds rather than for running a robot. Both cost speed and both default off. `CBGL_EXACT_FP` builds at `-O2 -fno-fast-math -ffp-contract=off` instead of `-Ofast`, so that two compilers agree. `CBGL_DETERMINISTIC_FFT` makes the matcher's transform plans chosen by heuristic rather than by timing, so that two runs agree. Set them on **both** packages in the same invocation, not on `cbgl` alone:
 

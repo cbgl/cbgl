@@ -1,0 +1,60 @@
+Stop the canonical scan matcher writing one entry past the end of its
+neighbour buffer.
+
+The matcher gathers, for each ray, the rays either side of it that belong to
+the same cluster, so that it can estimate the surface orientation there. The
+buffer it gathers them into is sized at twice the neighbourhood width, which
+is right: at most that many either side.
+
+The upward walk honours that. It tests whether the next index is still inside
+the neighbourhood before stepping onto it, so it adds at most the
+neighbourhood's worth of entries. The downward walk tests the index it is
+already standing on instead of the next one, so it takes one step more than
+its counterpart and can add one entry beyond what the buffer holds. At the
+neighbourhood width the ROS 1 build ships with, twenty, that is a forty first
+entry written into a buffer of forty.
+
+The correction mirrors the downward test on the upward one. Nothing else
+changes: the same rays are gathered in the same order, and only the step that
+was never inside the buffer is not taken.
+
+This matters here rather than being a curiosity because the path is entered
+whenever the angle based rejection of correspondences is switched on, and the
+ROS 1 build's own matcher settings ship it switched on. So it is the shipped
+configuration that overruns, not an unusual corner of it.
+
+Established by running rather than by reading. Address Sanitizer reports a
+heap buffer overflow, a write of four bytes zero bytes after a region of one
+hundred and sixty, inside the neighbour gathering routine, reached from the
+solver's entry point. Without the sanitizer the standard library's own bounds
+check fires and the process stops, so on this image the matcher cannot
+complete a match at all until this is applied. With it applied, both the
+address and the undefined behaviour sanitizers are silent, and five
+displacements of a square room, including the zero one, recover to within
+1e-15 in all three components.
+
+The same fault is present in the matcher's other variant, where the buffer is
+an array in the stack frame rather than one on the heap, so nothing there
+complains. Nothing is claimed here about what that write lands on.
+
+This is the Eigen variant of the matcher, on the `csm_eigen` branch, pinned at
+commit 04c4a31072e8690bd0ff14de50be20c5b6b43e66, whose sources have not
+moved since August 2022. The fault is upstream's rather than this tree's, so
+it belongs in an upstream report; until one is made and acted on, this patch
+is carried here.
+
+Apply from the root of the matcher's own sources:
+
+  patch -p1 < csm_neighbour_bounds.patch
+
+--- a/src/csm/orientation.cpp
++++ b/src/csm/orientation.cpp
+@@ -148,7 +148,7 @@ void find_neighbours(LDP ld, int i, int max_num, std::vector<int>& indexes, size
+ 		indexes[(*num_found)++] = up;
+ 	}
+ 	int down = i; 
+-	while ((down >= i-max_num) && (down-1>=0) && ld_valid_ray(ld,down-1) && 
++	while ((down-1 >= i-max_num) && (down-1>=0) && ld_valid_ray(ld,down-1) && 
+ 			(ld->cluster[down-1] == ld->cluster[i])) {
+ 		down-=1;
+ 		indexes[(*num_found)++] = down;

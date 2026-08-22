@@ -1,0 +1,39 @@
+Make the canonical scan matcher's pkg-config file name the shared library
+rather than the static one.
+
+The matcher's build produces two libraries from the same sources: a default
+one, which is shared when the build is told to prefer shared libraries, and a
+second that is forced static whatever it is told. Both are installed. Its
+pkg-config file names the static one.
+
+That matters here rather than being a preference. The matcher is LGPL v3, and
+the relinking obligation that licence places on anybody redistributing a
+binary is met by linking against it dynamically. A caller that asks
+pkg-config how to link, which is the obvious thing to do and the reason the
+file is shipped at all, is handed the static archive instead and links it in,
+quietly, with nothing to say so. Reading the linker command afterwards is the
+only way to find out. Naming the shared library removes the trap rather than
+leaving it for somebody to fall into.
+
+Nothing else about the file changes, and both libraries are still built and
+still installed. Only the answer pkg-config gives is corrected.
+
+This is the Eigen variant of the matcher, on the `csm_eigen` branch, pinned at
+commit 04c4a31072e8690bd0ff14de50be20c5b6b43e66. The fault is upstream's
+rather than this tree's, so it belongs in an upstream report; until one is
+made and acted on, this patch is carried here.
+
+Apply from the root of the matcher's own sources:
+
+  patch -p1 < csm_pkgconfig_shared.patch
+
+--- a/pkg-config/csm.pc.in
++++ b/pkg-config/csm.pc.in
+@@ -5,5 +5,5 @@ includedir=${prefix}/include
+ Name: csm
+ Description: The C(anonical) Scan Matcher
+ Version: @csm_version@
+-Libs: -L${libdir} -lcsm-static 
++Libs: -L${libdir} -lcsm 
+ Cflags: @PKG_CONFIG_C_FLAGS@ -I${includedir}
+\ No newline at end of file

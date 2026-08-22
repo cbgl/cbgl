@@ -1,0 +1,34 @@
+Raise the canonical scan matcher's CMake floor so that it configures under
+CMake 4.
+
+The matcher's build file asks for CMake 2.8 or newer. CMake 4.2.3, which this
+image carries, refuses that outright: compatibility with anything below 3.5
+has been removed, and the configure step stops before it reads another line.
+Raising the floor to 3.10 is the whole of the fix. Nothing else in the build
+file depends on the old behaviour, and afterwards the project configures with
+no warning at all, not even the deprecation notice that a floor between 3.5
+and 3.10 would still draw.
+
+3.10 rather than 3.5 for that reason: 3.5 configures, but warns that it will
+stop working, and a warning nobody can act on is worse than the smaller step
+that removes it. Nothing in the build file uses a command newer than 3.10.
+
+This is the Eigen variant of the matcher, on the `csm_eigen` branch, pinned at
+commit 04c4a31072e8690bd0ff14de50be20c5b6b43e66. The other variant's build
+file has a second fault of its own, a policy call CMake 4 no longer accepts.
+This one does not: there is no policy call anywhere in it, and this single
+line is the only build-file change needed.
+
+Apply from the root of the matcher's own sources:
+
+  patch -p1 < csm_cmake_floor.patch
+
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1,5 +1,5 @@
+ ## This CMakeLists.txt file exists only for building as ROS 3rd-party package. Building for other purpose is not tested. See https://github.com/AndreaCensi/csm/pull/10
+-cmake_minimum_required(VERSION 2.8)
++cmake_minimum_required(VERSION 3.10)
+ project(csm)
+ 
+ if(WIN32)
