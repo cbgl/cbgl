@@ -58,7 +58,12 @@ target_include_directories(cbgl_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
 
+# cbgl_core refines a survivor by one of two algorithms and the second of them
+# is cbgl_icp_refinement, so csm travels with the core rather than only with
+# whoever asked for that refinement. csm is LGPL v3 and the note above says what
+# that costs; it now costs it of everything that links the core.
 target_link_libraries(cbgl_core PUBLIC
+  cbgl_icp_refinement
   fsm_localisation::fsm_localisation_core)
 
 if(CBGL_DETERMINISTIC_FFT)
@@ -130,6 +135,7 @@ if(BUILD_TESTING)
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
   target_link_libraries(cbgl_core_exact PUBLIC
+    cbgl_icp_refinement
     fsm_localisation::fsm_localisation_core)
 
   target_compile_options(cbgl_core_exact PUBLIC
@@ -251,6 +257,13 @@ install(DIRECTORY include/cbgl
   DESTINATION include)
 
 install(DIRECTORY launch config
+  DESTINATION share/${PROJECT_NAME})
+
+# The licence texts are installed rather than left in the repository alone.
+# What a redistributor ships is this tree, not the sources, and LGPL v3 asks
+# for its own text to travel with the work. csm reaches every exported target
+# through cbgl_core, so the obligation reaches every one of them too.
+install(FILES LICENSE COPYING COPYING.LESSER
   DESTINATION share/${PROJECT_NAME})
 
 ament_export_targets(export_cbgl HAS_LIBRARY_TARGET)

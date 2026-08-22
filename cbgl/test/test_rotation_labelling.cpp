@@ -415,6 +415,133 @@ TEST_P(RotationLabelling, TheRangesOfCandidateKAreAFreshCastAtTheOrientationItIs
   }
 }
 
+
+/**
+ * @brief A narrower aperture takes the middle of the same rotated cast and
+ * changes nothing about the orientation a candidate is labelled with.
+ * @details
+ * A sensor that does not see all the way round is served by casting the whole
+ * turn at that sensor's own angular resolution and keeping only the middle
+ * window of it. The window is applied **after** the rotation, and this is the
+ * case that pins that ordering.
+ * Two things have to hold together and each would hide a fault in the other.
+ * The orientation of candidate `k` has to be exactly what it is for a
+ * panoramic sensor, because the rotation is over the whole turn either way and
+ * the aperture is not part of that arithmetic. And the ranges have to be the
+ * middle of the panoramic candidate's ranges, ray for ray, because they are
+ * meant to be the same cast read through a smaller aperture rather than a
+ * different cast.
+ * Asserting only the first would pass for a window taken from the wrong end.
+ * Asserting only the second would pass for a candidate labelled with anything
+ * at all.
+ * @remark The window's first ray is at `round((panoramic - kept) / 2)`, rounded
+ * away from zero. Three other places round it the same way: this package's own
+ * refinement, the ROS 1 build's sift, and the harness that shapes a recording
+ * into a narrower scan. They have to agree or the rays they align are not the
+ * same rays.
+ */
+TEST_P(RotationLabelling, ANarrowerApertureKeepsTheMiddleAndTheSameLabels)
+{
+  const GridCase geometry = std::get<0>(GetParam());
+  const unsigned int da = std::get<1>(GetParam());
+
+  const double range_max = rangeMaxOf(geometry);
+
+  const std::shared_ptr<const OccupancyGridMap> map = mapOf(geometry);
+  ASSERT_NE(map, nullptr);
+
+  const Pose pose = sensorPose(*map);
+
+  const std::vector<double> cast = map->ranges(pose, kRayCount, range_max);
+
+  const std::vector<Candidate> panoramic = cbgl::candidatesOf(pose, cast, da);
+
+  /* Three quarters of a turn, which is the aperture the two builds are
+   * compared at, and two apertures either side of it so that a fault in the
+   * window's arithmetic cannot hide behind one convenient number. 271 is odd
+   * against an even ray count, which is the case where the halfway rounding
+   * decides the answer. */
+  for (const unsigned int kept : {270U, 271U, 359U})
+  {
+    const std::vector<Candidate> narrow =
+      cbgl::candidatesOf(pose, cast, da, kept);
+
+    ASSERT_EQ(narrow.size(), da);
+
+    const std::size_t prefix = static_cast<std::size_t>(
+      std::llround(static_cast<double>(kRayCount - kept) / 2.0));
+
+    for (unsigned int k = 0U; k < da; k++)
+    {
+      ASSERT_EQ(narrow[k].ranges.size(), kept)
+        << "candidate " << k << " at an aperture of " << kept << " rays "
+        << "carries " << narrow[k].ranges.size() << " of them. The aperture "
+        << "is how many rays a candidate keeps and nothing else decides it.";
+
+      EXPECT_DOUBLE_EQ(narrow[k].pose.t, panoramic[k].pose.t)
+        << "candidate " << k << " of " << da << " is labelled "
+        << narrow[k].pose.t << " radians at an aperture of " << kept
+        << " rays and " << panoramic[k].pose.t << " at a full turn. The "
+        << "rotation is over the whole turn whatever the aperture, so the "
+        << "label cannot depend on it. A label that moved with the aperture "
+        << "would send the refinement to a different starting orientation for "
+        << "the same candidate of the same cast.";
+
+      EXPECT_DOUBLE_EQ(narrow[k].pose.x, panoramic[k].pose.x);
+      EXPECT_DOUBLE_EQ(narrow[k].pose.y, panoramic[k].pose.y);
+
+      for (std::size_t i = 0; i < kept; i++)
+      {
+        ASSERT_DOUBLE_EQ(narrow[k].ranges[i], panoramic[k].ranges[prefix + i])
+          << "ray " << i << " of candidate " << k << " at an aperture of "
+          << kept << " rays is not ray " << (prefix + i) << " of the same "
+          << "candidate at a full turn. The narrower sensor is meant to be the "
+          << "same cast seen through a smaller aperture, so its rays have to "
+          << "be the middle of the wider one's, taken from " << prefix
+          << " onwards. A window from the wrong end reads the map behind the "
+          << "sensor as though it were in front of it.";
+      }
+    }
+  }
+}
+
+/**
+ * @brief A full turn asked for as an aperture is the same as not asking.
+ * @details The narrower path and the panoramic one have to be one path, not
+ * two that happen to agree. Every committed record of this package was taken
+ * before an aperture existed, and the reproduction of those records is what
+ * proves the default unchanged; this is the same property asserted where it is
+ * cheap to assert, so that a fault in it is named here rather than found by a
+ * hundred trials disagreeing.
+ */
+TEST_P(RotationLabelling, AskingForTheWholeTurnIsAskingForNothing)
+{
+  const GridCase geometry = std::get<0>(GetParam());
+  const unsigned int da = std::get<1>(GetParam());
+
+  const std::shared_ptr<const OccupancyGridMap> map = mapOf(geometry);
+  ASSERT_NE(map, nullptr);
+
+  const Pose pose = sensorPose(*map);
+
+  const std::vector<double> cast =
+    map->ranges(pose, kRayCount, rangeMaxOf(geometry));
+
+  const std::vector<Candidate> implied = cbgl::candidatesOf(pose, cast, da);
+  const std::vector<Candidate> stated =
+    cbgl::candidatesOf(pose, cast, da, kRayCount);
+
+  ASSERT_EQ(implied.size(), stated.size());
+
+  for (unsigned int k = 0U; k < da; k++)
+  {
+    EXPECT_DOUBLE_EQ(stated[k].pose.t, implied[k].pose.t);
+    EXPECT_EQ(stated[k].ranges, implied[k].ranges)
+      << "candidate " << k << " differs between an aperture stated as the "
+      << "whole turn and one left unstated. They are the same aperture.";
+  }
+}
+
 INSTANTIATE_TEST_SUITE_P(
   OverGridsAndOrientationCounts, RotationLabelling,
   testing::Combine(testing::ValuesIn(kGrids), testing::Values(8U, 32U, 7U)),

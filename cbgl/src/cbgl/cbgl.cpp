@@ -39,19 +39,35 @@ namespace cbgl
 namespace
 {
 /**
+ * @brief What refining a whole set of survivors amounts to: the corrected pose
+ * of every survivor the refinement accepted, and how many it refused, counted
+ * by the reason it gave.
+ * @details Two counts rather than one because the two refinements refuse for
+ * reasons that do not correspond and neither reason set is the other written
+ * differently. One refinement runs per localisation, so at most one of the two
+ * is ever filled.
+ */
+struct Refinement
+{
+  std::vector<Pose> corrected;
+
+  std::map<IcpError, unsigned int> icp_refusals;
+
+  std::map<fsm_localisation::CorrectionError, unsigned int> refusals;
+};
+
+/**
  * @brief The corrected pose of every survivor the matcher accepted, and how
  * many it refused, by reason.
  * @details Refinement is not asked to run concurrently, `top_k_caers` being
  * small enough that there is nothing to gain from splitting it the way the
  * sift is.
  */
-std::pair<std::vector<Pose>, std::map<fsm_localisation::CorrectionError, unsigned int>>
-correctedPosesOf(std::span<const ScoredPose> survivors,
+Refinement correctedPosesOf(std::span<const ScoredPose> survivors,
   std::span<const double> scan, const double range_max,
   const fsm_localisation::Corrector& corrector)
 {
-  std::vector<Pose> corrected;
-  std::map<fsm_localisation::CorrectionError, unsigned int> refusals;
+  Refinement refinement;
 
   for (const ScoredPose& survivor : survivors)
   {
@@ -60,12 +76,49 @@ correctedPosesOf(std::span<const ScoredPose> survivors,
       corrector.correct(scan, survivor.pose, range_max);
 
     if (result.has_value())
-      corrected.push_back(result->corrected);
+      refinement.corrected.push_back(result->corrected);
     else
-      refusals[result.error()]++;
+      refinement.refusals[result.error()]++;
   }
 
-  return {std::move(corrected), std::move(refusals)};
+  return refinement;
+}
+
+/**
+ * @brief The corrected pose of every survivor the iterative closest point
+ * refinement accepted, and how many it refused, by reason.
+ * @details Serial as well, and not for the reason the overload above is. That
+ * one is serial because splitting it would buy nothing. This one is serial
+ * because it cannot be split at all: the solver underneath keeps its context
+ * stack, the counters that go with it and every matrix it has allocated in
+ * process globals and guards none of it, so two refinements running at once
+ * can be handed each other's matrices. `IcpRefiner`'s own header says so, of
+ * any two calls anywhere in the process and not only of two on one refiner.
+ * @remark What the refinement reports beyond the corrected pose, its error and
+ * its cycle count, is dropped here. It says nothing on its own and means
+ * something only against the same figures from another candidate of the same
+ * scan, and the selection that follows ranks the corrected poses by the same
+ * metric the sift ranked them by rather than by anything a refinement said
+ * about itself.
+ */
+Refinement correctedPosesOf(std::span<const ScoredPose> survivors,
+  std::span<const double> scan, const double range_min, const double range_max,
+  const double aperture, const IcpRefiner& refiner)
+{
+  Refinement refinement;
+
+  for (const ScoredPose& survivor : survivors)
+  {
+    const std::expected<IcpResult, IcpError> result =
+      refiner.refine(scan, survivor.pose, range_min, range_max, aperture);
+
+    if (result.has_value())
+      refinement.corrected.push_back(result->corrected);
+    else
+      refinement.icp_refusals[result.error()]++;
+  }
+
+  return refinement;
 }
 
 /**
@@ -76,6 +129,49 @@ correctedPosesOf(std::span<const ScoredPose> survivors,
 FSM::RaySearch raySearchOf(const std::string& ray_search)
 {
   return ray_search == "windowed" ? FSM::RaySearch::windowed : FSM::RaySearch::angular;
+}
+
+/**
+ * @brief How many rays a cast must carry for a scan of `rays` rays spanning
+ * `aperture` radians to be read against a full turn of map.
+ * @details A sensor that sees all the way round is its own answer. One that
+ * does not is served by casting the whole turn at the sensor's own angular
+ * resolution and comparing only the part of it the sensor could have seen,
+ * which is what `prefixOf` and the window in `candidatesOf` then do. Casting
+ * the sensor's own ray count over a full turn instead would compare a fraction
+ * of a turn of measurement against the whole of one, which is not a worse
+ * answer but no answer at all.
+ * @remark The rounding is away from zero, which is what the ROS 1 build's own
+ * sift does and what the harness that shapes a narrower scan does. All three
+ * have to agree on where a window starts or the rays they align are not the
+ * same rays.
+ */
+std::size_t panoramicRaysOf(const std::size_t rays, const double aperture)
+{
+  if (rays == 0 || !(aperture > 0.0))
+    return rays;
+
+  const double turn =
+    static_cast<double>(rays) * 2.0 * M_PI / aperture;
+
+  const std::size_t panoramic =
+    static_cast<std::size_t>(std::llround(turn));
+
+  return panoramic < rays ? rays : panoramic;
+}
+
+/**
+ * @brief How many rays of a panoramic cast sit before the window keeps any.
+ * @details The window is centred, so what is dropped is split evenly between
+ * the two ends and an odd remainder puts the extra ray at the near end.
+ */
+std::size_t prefixOf(const std::size_t panoramic, const std::size_t rays)
+{
+  if (panoramic <= rays)
+    return 0;
+
+  return static_cast<std::size_t>(
+    std::llround(static_cast<double>(panoramic - rays) / 2.0));
 }
 
 /**
@@ -133,15 +229,18 @@ std::expected<std::vector<double>, Error::Reason> reducedRanges(
  * division that follows safe.
  */
 std::vector<ScoredPose> scoredCandidatesOf(std::span<const Pose> hypotheses,
-  std::span<const double> measured, const double range_max,
-  const Parameters& parameters, const FSM::GridReference& map)
+  std::span<const double> measured, const double aperture,
+  const double range_max, const Parameters& parameters,
+  const FSM::GridReference& map)
 {
   std::vector<ScoredPose> scored(hypotheses.size() * parameters.da);
 
   if (hypotheses.empty())
     return scored;
 
-  const unsigned int num_rays = static_cast<unsigned int>(measured.size());
+  const std::size_t rays = measured.size();
+  const unsigned int num_rays =
+    static_cast<unsigned int>(panoramicRaysOf(rays, aperture));
 
   const auto scoreOne = [&](const std::size_t hypothesis)
   {
@@ -149,7 +248,7 @@ std::vector<ScoredPose> scoredCandidatesOf(std::span<const Pose> hypotheses,
       map.ranges(hypotheses[hypothesis], num_rays, range_max);
 
     const std::vector<Candidate> candidates =
-      candidatesOf(hypotheses[hypothesis], cast, parameters.da);
+      candidatesOf(hypotheses[hypothesis], cast, parameters.da, rays);
 
     for (unsigned int k = 0U; k < parameters.da; k++)
       scored[hypothesis * parameters.da + k] = ScoredPose{
@@ -246,9 +345,12 @@ double caer(std::span<const double> measured, std::span<const double> cast,
 }
 
 std::vector<Candidate> candidatesOf(const Pose& pose,
-  std::span<const double> cast, const unsigned int da)
+  std::span<const double> cast, const unsigned int da,
+  const std::size_t rays)
 {
   const std::size_t n = cast.size();
+  const std::size_t kept = rays == 0 ? n : rays;
+  const std::size_t prefix = prefixOf(n, kept);
 
   std::vector<Candidate> candidates(da);
 
@@ -262,9 +364,9 @@ std::vector<Candidate> candidatesOf(const Pose& pose,
       : FSM::Utils::wrapAngle(pose.t +
           2.0 * M_PI * static_cast<double>(shift) / static_cast<double>(n));
 
-    std::vector<double> rotated(n);
-    for (std::size_t i = 0; i < n; i++)
-      rotated[i] = cast[(static_cast<std::size_t>(shift) + i) % n];
+    std::vector<double> rotated(kept);
+    for (std::size_t i = 0; i < kept; i++)
+      rotated[i] = cast[(static_cast<std::size_t>(shift) + prefix + i) % n];
 
     candidates[k] = Candidate{
       .pose = Pose{.x = pose.x, .y = pose.y, .t = heading},
@@ -289,6 +391,16 @@ std::string validate(const Parameters& parameters)
   return fsm_localisation::validate(parameters.matcher);
 }
 
+/**
+ * @details The matcher is built whichever refinement was asked for, its
+ * settings carrying the reduction every stage of a run works from as well as
+ * the refinement's own. The iterative closest point refinement is built beside
+ * it only where the settings carry a set for it, and it is built in the body
+ * rather than in the list above because a refinement that is there sometimes
+ * cannot be written there: one can be neither copied nor moved, deliberately,
+ * so there is no one expression that yields either a refinement or nothing for
+ * the list to take.
+ */
 Localiser::Localiser(const Parameters& parameters,
   std::shared_ptr<const FSM::GridReference> map,
   FreeSpace free_space)
@@ -297,6 +409,8 @@ Localiser::Localiser(const Parameters& parameters,
   map_(std::move(map)),
   parameters_(parameters)
 {
+  if (parameters_.icp.has_value())
+    icp_refiner_.emplace(*parameters_.icp, map_);
 }
 
 /**
@@ -339,22 +453,27 @@ std::vector<Pose> Localiser::disperse() const
  * @details The map's free space is checked before the scan is even reduced,
  * since it is a property of the map rather than of the scan and answering it
  * costs nothing. An empty hypothesis set is refused separately and by its own
- * reason, since the three argument overload exists precisely so a caller can
+ * reason, since the four argument overload exists precisely so a caller can
  * hand one in, and reporting it as the map having no free space would be
  * false on a map that plainly has some. The scan is then reduced exactly
  * once, by `reducedRanges`, and that single reduced scan is what the sift,
  * the refinement and the selection all work from.
+ * Which refinement runs is settled once, here, rather than survivor by
+ * survivor, and it is settled by whether one was built at construction.
  */
 std::expected<Result, Error> Localiser::localise(std::span<const double> ranges,
-  const double range_max, std::span<const Pose> hypotheses) const
+  const double range_min, const double range_max,
+  std::span<const Pose> hypotheses, const double aperture) const
 {
   if (free_space_.cells.empty())
     return std::unexpected(Error{
-      .reason = Error::Reason::map_has_no_free_space, .refusals = {}});
+      .reason = Error::Reason::map_has_no_free_space,
+      .icp_refusals = {}, .refusals = {}});
 
   if (hypotheses.empty())
     return std::unexpected(Error{
-      .reason = Error::Reason::no_hypotheses_given, .refusals = {}});
+      .reason = Error::Reason::no_hypotheses_given,
+      .icp_refusals = {}, .refusals = {}});
 
   const std::chrono::steady_clock::time_point started =
     std::chrono::steady_clock::now();
@@ -363,10 +482,11 @@ std::expected<Result, Error> Localiser::localise(std::span<const double> ranges,
     reducedRanges(ranges, parameters_);
 
   if (!reduced.has_value())
-    return std::unexpected(Error{.reason = reduced.error(), .refusals = {}});
+    return std::unexpected(Error{
+      .reason = reduced.error(), .icp_refusals = {}, .refusals = {}});
 
-  std::vector<ScoredPose> scored =
-    scoredCandidatesOf(hypotheses, *reduced, range_max, parameters_, *map_);
+  std::vector<ScoredPose> scored = scoredCandidatesOf(
+    hypotheses, *reduced, aperture, range_max, parameters_, *map_);
 
   const std::size_t num_candidates = scored.size();
   const std::size_t kept =
@@ -376,31 +496,41 @@ std::expected<Result, Error> Localiser::localise(std::span<const double> ranges,
   scored.resize(kept);
   std::ranges::sort(scored, {}, &ScoredPose::score);
 
-  const auto [corrected, refusals] =
-    correctedPosesOf(scored, *reduced, range_max, corrector_);
+  const Refinement refinement = icp_refiner_.has_value()
+    ? correctedPosesOf(
+        scored, *reduced, range_min, range_max, aperture, *icp_refiner_)
+    : correctedPosesOf(scored, *reduced, range_max, corrector_);
 
-  if (corrected.empty())
+  if (refinement.corrected.empty())
     return std::unexpected(Error{
       .reason = Error::Reason::every_survivor_refused,
-      .refusals = refusals});
+      .icp_refusals = refinement.icp_refusals,
+      .refusals = refinement.refusals});
 
   std::vector<ScoredPose> rescored;
-  rescored.reserve(corrected.size());
+  rescored.reserve(refinement.corrected.size());
 
-  for (const Pose& pose : corrected)
+  const std::size_t panoramic = panoramicRaysOf(reduced->size(), aperture);
+  const std::size_t prefix = prefixOf(panoramic, reduced->size());
+
+  for (const Pose& pose : refinement.corrected)
   {
     const std::vector<double> cast = map_->ranges(
-      pose, static_cast<unsigned int>(reduced->size()), range_max);
+      pose, static_cast<unsigned int>(panoramic), range_max);
+
+    const std::span<const double> seen(cast.data() + prefix, reduced->size());
 
     rescored.push_back(ScoredPose{
-      .pose = pose, .score = caer(*reduced, cast, range_max)});
+      .pose = pose, .score = caer(*reduced, seen, range_max)});
   }
 
   const auto winner = std::ranges::min_element(rescored, {}, &ScoredPose::score);
 
   if (std::isinf(winner->score))
     return std::unexpected(Error{
-      .reason = Error::Reason::no_scorable_pose, .refusals = refusals});
+      .reason = Error::Reason::no_scorable_pose,
+      .icp_refusals = refinement.icp_refusals,
+      .refusals = refinement.refusals});
 
   return Result{
     .pose = winner->pose,
@@ -408,14 +538,15 @@ std::expected<Result, Error> Localiser::localise(std::span<const double> ranges,
       std::chrono::steady_clock::now() - started).count(),
     .num_candidates = num_candidates,
     .survivors = std::move(scored),
-    .refusals = refusals};
+    .icp_refusals = refinement.icp_refusals,
+    .refusals = refinement.refusals};
 }
 
 std::expected<Result, Error> Localiser::localise(std::span<const double> ranges,
-  const double range_max) const
+  const double range_min, const double range_max, const double aperture) const
 {
   const std::vector<Pose> hypotheses = disperse();
-  return localise(ranges, range_max, hypotheses);
+  return localise(ranges, range_min, range_max, hypotheses, aperture);
 }
 
 }

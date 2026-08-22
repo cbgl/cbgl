@@ -46,6 +46,31 @@ namespace cbgl
 namespace
 {
 /**
+ * @brief How many rays a cast must carry for a scan of `rays` rays spanning
+ * `aperture` radians to be read against a full turn of map.
+ * @details The caster sweeps a whole turn whatever it is asked for, so a
+ * sensor that sees less than one is served by asking for the ray count a whole
+ * turn carries at that sensor's own angular resolution and then keeping the
+ * middle of what comes back. Asking for the sensor's own count instead would
+ * spread its rays over the whole turn and match a scan against a reference of
+ * a different shape entirely.
+ * @remark The rounding is away from zero, matching the sift's own and the ROS
+ * 1 build's own. Three places have to agree on where a window starts or the
+ * rays they align are not the same rays.
+ */
+std::size_t panoramicRaysOf(const std::size_t rays, const double aperture)
+{
+  if (rays == 0 || !(aperture > 0.0))
+    return rays;
+
+  const double turn = static_cast<double>(rays) * 2.0 * M_PI / aperture;
+
+  const std::size_t panoramic = static_cast<std::size_t>(std::llround(turn));
+
+  return panoramic < rays ? rays : panoramic;
+}
+
+/**
  * @brief The fewest and the most rays the solver will accept in a scan.
  * @details Its own bounds, checked inside it before anything else and answered
  * with a refusal that says only that the match failed. They are checked here
@@ -399,7 +424,8 @@ IcpRefiner::IcpRefiner(const IcpParameters& parameters,
  */
 std::expected<IcpResult, IcpError> IcpRefiner::refine(
   const std::span<const double> ranges, const Pose& estimate,
-  const double range_min, const double range_max) const
+  const double range_min, const double range_max,
+  const double aperture) const
 {
   if (ranges.empty())
     return std::unexpected(IcpError::scan_empty);
@@ -418,13 +444,21 @@ std::expected<IcpResult, IcpError> IcpRefiner::refine(
   if (std::ranges::none_of(validity, [](const int valid) { return valid == 1; }))
     return std::unexpected(IcpError::scan_entirely_invalid);
 
-  const std::vector<double> cast = map_->ranges(estimate,
-    static_cast<unsigned int>(ranges.size()), range_max);
+  const std::size_t panoramic = panoramicRaysOf(ranges.size(), aperture);
 
-  if (cast.size() != ranges.size())
+  const std::vector<double> cast = map_->ranges(estimate,
+    static_cast<unsigned int>(panoramic), range_max);
+
+  if (cast.size() != panoramic)
     return std::unexpected(IcpError::cast_length_mismatch);
 
-  const LaserDataHandle reference = laserDataOf(cast, range_min, range_max);
+  const std::size_t prefix =
+    static_cast<std::size_t>(std::llround(
+      static_cast<double>(panoramic - ranges.size()) / 2.0));
+
+  const std::span<const double> seen(cast.data() + prefix, ranges.size());
+
+  const LaserDataHandle reference = laserDataOf(seen, range_min, range_max);
 
   sm_params input = matcherInputOf(parameters_, range_min, range_max);
   input.laser_ref = reference.get();

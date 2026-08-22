@@ -91,6 +91,23 @@
  * cell sizes and so is its free area, so the same density draws the same number
  * of hypotheses at either resolution and the two cases differ in the map's
  * resolution and in nothing else.
+ * **The other refinement.** Every case above refines a survivor by the matcher,
+ * which is what a parameter set carrying no settings for the iterative closest
+ * point solver asks for. Four cases carry a set for it instead, which is the
+ * whole of how the second refinement is chosen, and they are what walks the
+ * half of a run that lies downstream of the sift a second time: a pose
+ * recovered from a hypothesis set the localiser drew, a hypothesis put three
+ * cells along and two across from the truth and walked back onto it, the same
+ * scan localised three times over for an answer that repeats to the last bit,
+ * and a run whose every survivor that refinement refused. That last one is
+ * where the two counts a result carries are told apart, a refusal of one
+ * refinement being no fact at all about the other.
+ * @remark Nothing here refines from two threads. The solver the second
+ * refinement is built on keeps its context stack, its counters and every matrix
+ * it has allocated in process globals and guards none of it, so two refinements
+ * running at once can be handed each other's matrices. Its own header says so
+ * of any two calls anywhere in the process rather than only of two on one
+ * refiner.
  */
 
 #include <gtest/gtest.h>
@@ -117,6 +134,8 @@ namespace
 {
 using cbgl::Error;
 using cbgl::FreeSpace;
+using cbgl::IcpError;
+using cbgl::IcpParameters;
 using cbgl::Localiser;
 using cbgl::Parameters;
 using cbgl::Point;
@@ -143,6 +162,17 @@ const double kDensity = 15.0;
  * ray meeting nothing reports in them.
  */
 const double kRangeMax = 100.0;
+
+/**
+ * @brief The minimum range the fixture's scans report from, nothing in them
+ * being shorter than nought.
+ * @details Handed to every localisation below. The cases that refine with the
+ * matcher do not read it: the sift, the matcher and the selection each judge a
+ * reading by the matcher's own test of it, which knows no lower bound. The
+ * cases that refine by iterative closest point do read it, that refinement
+ * marking a reading under it unusable rather than treating it as a distance.
+ */
+const double kRangeMin = 0.0;
 
 /**
  * @brief The scans cast from the room's own polygons, and the poses they were
@@ -342,6 +372,23 @@ Parameters parametersOf(const unsigned int top_k_caers)
   return parameters;
 }
 
+/**
+ * @brief The same parameters, refining every survivor by iterative closest
+ * point instead of by the matcher.
+ * @details The settings are that refinement's own defaults, which are what the
+ * node declares where it is chosen. Filling the field is the whole of how a
+ * refinement is chosen, so this differs from `parametersOf` in one member and
+ * in nothing else, and a case run through both compares two refinements of one
+ * search rather than two searches.
+ */
+Parameters parametersRefiningByIcp(const unsigned int top_k_caers)
+{
+  Parameters parameters = parametersOf(top_k_caers);
+  parameters.icp = IcpParameters{};
+
+  return parameters;
+}
+
 GridFixture readGrid(const std::string& name)
 {
   std::ifstream file(fixturePath(name));
@@ -479,6 +526,94 @@ Pose worldFromRoom(const OccupancyGridMap& map, const double origin_yaw,
 
 }
 
+/**
+ * @brief The other refinement walks a hypothesis standing off the truth back
+ * onto it.
+ * @details One hypothesis is handed in, three cells along and two cells across
+ * from where the measurement was cast, so it stands `sqrt(3 * 3 + 2 * 2)`
+ * cells away, which is a little over three and a half of them. The answer is
+ * held to the two cells every other case here holds one to, and the case
+ * asserts before it starts that the two cells are fewer than the three and a
+ * half: a refinement that handed its estimate straight back would otherwise
+ * pass this.
+ * The heading of the hypothesis is the truth's, which decides nothing. The
+ * search scores that one position at `da` orientations whatever heading it was
+ * handed, so the candidate the refinement is given carries a heading of the
+ * search's own choosing rather than the one written here.
+ * @remark The refinement runs one survivor at a time and is asked to here as
+ * well, the solver underneath keeping its whole working state in process
+ * globals and guarding none of it. Nothing in this file refines from a second
+ * thread.
+ */
+TEST(Localiser, AHypothesisDisplacedFromTheTruthIsWalkedBackByTheIcpRefinement)
+{
+  const GridFixture fixture = readGrid("pillar_room_grid_fine.csv");
+  const std::shared_ptr<const OccupancyGridMap> map = mapOf(fixture);
+  ASSERT_NE(map, nullptr);
+
+  const std::vector<Pose> room_poses = readTruth(kTruthFixture);
+  ASSERT_FALSE(room_poses.empty())
+    << "the truth fixture " << kTruthFixture << " named no pose, so there is "
+    << "no pose to cast the measurement from.";
+
+  const Pose truth = worldFromRoom(*map, fixture.origin_yaw, room_poses[0]);
+  ASSERT_TRUE(map->isFree(truth.x, truth.y));
+
+  const std::vector<double> measured = map->ranges(truth, kRayCount, kRangeMax);
+
+  const double cell = map->resolution();
+
+  const Pose displaced{
+    .x = truth.x + 3.0 * cell, .y = truth.y - 2.0 * cell, .t = truth.t};
+
+  ASSERT_TRUE(map->isFree(displaced.x, displaced.y))
+    << "the hypothesis has to stand somewhere the map calls free, or what the "
+    << "refinement is handed is a cast taken from inside a wall and the case "
+    << "is about that instead.";
+
+  const double displacement =
+    std::hypot(displaced.x - truth.x, displaced.y - truth.y);
+
+  const double bound = 2.0 * cell;
+
+  ASSERT_GT(displacement, bound)
+    << "the hypothesis stands " << displacement << " m from the truth and the "
+    << "answer is held to " << bound << " m. The first has to be the larger "
+    << "of the two, or a refinement that returned the estimate it was given "
+    << "would satisfy this case without refining anything.";
+
+  const Localiser localiser(
+    parametersRefiningByIcp(kTopK), map, freeSpaceOfMap(*map));
+
+  const std::vector<Pose> hypotheses{displaced};
+
+  const std::expected<Result, Error> result =
+    localiser.localise(measured, kRangeMin, kRangeMax, hypotheses);
+
+  ASSERT_TRUE(result.has_value())
+    << "the one hypothesis handed in stands three cells along and two across "
+    << "from where the measurement was cast, which is well inside every bound "
+    << "the refinement's own settings allow a correction to reach.";
+
+  EXPECT_EQ(result->num_candidates, hypotheses.size() * kOrientations)
+    << "one hypothesis at " << kOrientations << " orientations is "
+    << kOrientations << " candidates, and choosing the other refinement "
+    << "changes what a survivor is refined by rather than what is searched.";
+
+  EXPECT_TRUE(result->refusals.empty())
+    << "the matcher was never asked to refine anything here, so a count under "
+    << "its reasons would name a stage that did not run.";
+
+  EXPECT_NEAR(result->pose.x, truth.x, bound);
+  EXPECT_NEAR(result->pose.y, truth.y, bound);
+
+  EXPECT_LT(headingError(result->pose.t, truth.t),
+    headingBound(measured, cell, 2.0))
+    << "a heading wrong by dt moves what the sensor would see at range r "
+    << "sideways by r * dt, so the same two cells as an angle is what the "
+    << "heading is held to.";
+}
+
 TEST(Localiser, AHypothesisSetHandedInIsTheSetTheSearchUses)
 {
   const GridFixture fixture = readGrid("pillar_room_grid_fine.csv");
@@ -499,7 +634,7 @@ TEST(Localiser, AHypothesisSetHandedInIsTheSetTheSearchUses)
   const Localiser localiser(parametersOf(kTopK), map, freeSpaceOfMap(*map));
 
   const std::expected<Result, Error> result =
-    localiser.localise(measured, kRangeMax, hypotheses);
+    localiser.localise(measured, kRangeMin, kRangeMax, hypotheses);
 
   ASSERT_TRUE(result.has_value())
     << "the one hypothesis handed in is the pose the measurement was cast at, "
@@ -530,7 +665,7 @@ TEST(Localiser, AMapWithNoFreeSpaceIsRefused)
   const std::vector<double> measured(kRayCount, 1.0);
 
   const std::expected<Result, Error> result =
-    localiser.localise(measured, kRangeMax);
+    localiser.localise(measured, kRangeMin, kRangeMax);
 
   ASSERT_FALSE(result.has_value())
     << "a map with no free cell offers nowhere for the sensor to have been, so "
@@ -588,7 +723,7 @@ TEST(Localiser, AMapWithNothingInRangeIsRefusedBeforeAnUnscorablePoseCanWin)
   const std::vector<Pose> hypotheses{standing};
 
   const std::expected<Result, Error> result =
-    localiser.localise(measured, kRangeMax, hypotheses);
+    localiser.localise(measured, kRangeMin, kRangeMax, hypotheses);
 
   ASSERT_FALSE(result.has_value())
     << "every pose on this map is unscorable, since no ray from any of them "
@@ -700,7 +835,7 @@ TEST(Localiser, AMeasurementEntirelyAtItsMaximumRangeIsRankedByTheSpaceSeen)
   const Localiser localiser(parametersOf(kTopK), map, free_space);
 
   const std::expected<Result, Error> result =
-    localiser.localise(measured, kRangeMax, hypotheses);
+    localiser.localise(measured, kRangeMin, kRangeMax, hypotheses);
 
   ASSERT_TRUE(result.has_value())
     << "a measurement entirely at its own maximum range is answered today, "
@@ -752,7 +887,7 @@ TEST(Localiser, AMeasurementEntirelyAtItsMaximumRangeIsRankedByTheSpaceSeen)
 
 /**
  * @brief An empty hypothesis set is refused for being empty.
- * @details The three argument entry point exists so a caller can hand in a
+ * @details The four argument entry point exists so a caller can hand in a
  * hypothesis set of its own, and an empty one is the caller's doing rather than
  * the map's. Reporting it as a map with no free space is a false sentence about
  * a map with thousands of free cells, and it sends whoever reads the log to
@@ -786,7 +921,7 @@ TEST(Localiser, AnEmptyHypothesisSetIsRefusedForBeingEmpty)
   const std::vector<Pose> none;
 
   const std::expected<Result, Error> refused =
-    localiser.localise(measured, kRangeMax, none);
+    localiser.localise(measured, kRangeMin, kRangeMax, none);
 
   ASSERT_FALSE(refused.has_value())
     << "there is no hypothesis to score, so there is nothing to rank, nothing "
@@ -799,10 +934,73 @@ TEST(Localiser, AnEmptyHypothesisSetIsRefusedForBeingEmpty)
 
   const std::vector<Pose> one{truth};
 
-  EXPECT_TRUE(localiser.localise(measured, kRangeMax, one).has_value())
+  EXPECT_TRUE(
+    localiser.localise(measured, kRangeMin, kRangeMax, one).has_value())
     << "the same localiser, the same map and the same scan answer from a set "
     << "of one pose, so the refusal above is about the set being empty and "
     << "about nothing else in the run.";
+}
+
+/**
+ * @brief A pose is recovered through the other refinement, from a hypothesis
+ * set the localiser drew itself.
+ * @details The same room, the same measurement and the same two cell bound as
+ * the case that recovers a pose from a scan the map itself cast. What differs
+ * is one member of the parameter set, which sends every survivor to the
+ * iterative closest point refinement instead of to the matcher, and the whole
+ * of the run downstream of the sift therefore travels a second path that
+ * nothing else here walks.
+ * The bound is two cells for the reason it is two cells everywhere else in
+ * this file: one for what a map of this cell size can support at all, a ray
+ * stopping at a cell, and another for the half cell diagonal between the truth
+ * and the centre of the cell the hypothesis was drawn at.
+ * @remark What the matcher's refusal count says is asserted to be nothing. One
+ * refinement runs per localisation and the other one did not run, so a count
+ * under the matcher's reasons here would be a fact about a stage that was
+ * never asked.
+ */
+TEST(Localiser, APoseIsRecoveredByTheIcpRefinementFromTheLocalisersOwnDraw)
+{
+  const GridFixture fixture = readGrid("pillar_room_grid_fine.csv");
+  const std::shared_ptr<const OccupancyGridMap> map = mapOf(fixture);
+  ASSERT_NE(map, nullptr);
+
+  const std::vector<Pose> room_poses = readTruth(kTruthFixture);
+  ASSERT_FALSE(room_poses.empty())
+    << "the truth fixture " << kTruthFixture << " named no pose, so there is "
+    << "no pose to cast the measurement from.";
+
+  const Pose truth = worldFromRoom(*map, fixture.origin_yaw, room_poses[0]);
+  ASSERT_TRUE(map->isFree(truth.x, truth.y));
+
+  const std::vector<double> measured = map->ranges(truth, kRayCount, kRangeMax);
+
+  const Localiser localiser(
+    parametersRefiningByIcp(kTopK), map, freeSpaceOfMap(*map));
+
+  const std::expected<Result, Error> result =
+    localiser.localise(measured, kRangeMin, kRangeMax);
+
+  ASSERT_TRUE(result.has_value())
+    << "the measurement is the cast the map itself gives at a pose the map "
+    << "calls free, and the search draws its own hypotheses over that map at a "
+    << "pinned seed. A run of it that produces no pose at all has lost the "
+    << "answer somewhere between the sift and the selection.";
+
+  EXPECT_TRUE(result->refusals.empty())
+    << "the matcher refined nothing here and a count under its reasons would "
+    << "name a stage that never ran. What this run refused, if it refused "
+    << "anything, belongs under the other refinement's own reasons.";
+
+  const double bound = 2.0 * map->resolution();
+
+  EXPECT_NEAR(result->pose.x, truth.x, bound);
+  EXPECT_NEAR(result->pose.y, truth.y, bound);
+
+  EXPECT_LT(headingError(result->pose.t, truth.t),
+    headingBound(measured, map->resolution(), 2.0))
+    << "the same two cells as an angle, a heading wrong by dt moving what the "
+    << "sensor would see at range r sideways by r * dt.";
 }
 
 /**
@@ -882,7 +1080,7 @@ TEST(Localiser, AReferenceThatCastsNothingFromAFreePoseYieldsNoAnswer)
   const std::vector<Pose> hypotheses{standing};
 
   const std::expected<Result, Error> result =
-    localiser.localise(measured, kRangeMax, hypotheses);
+    localiser.localise(measured, kRangeMin, kRangeMax, hypotheses);
 
   ASSERT_FALSE(result.has_value())
     << "the pose the run would have reported cannot be graded by the very "
@@ -940,7 +1138,7 @@ TEST(Localiser, AScanCarryingNoRaysAtAllIsRefused)
   const std::vector<double> no_rays;
 
   const std::expected<Result, Error> result =
-    localiser.localise(no_rays, kRangeMax);
+    localiser.localise(no_rays, kRangeMin, kRangeMax);
 
   ASSERT_FALSE(result.has_value())
     << "the matcher is set to " << kRayCount << " rays and the scan carries "
@@ -982,7 +1180,7 @@ TEST(Localiser, AScanOfMoreRaysThanTheMatcherAsksForIsReducedAndStillRecovers)
   const Localiser localiser(parameters, map, freeSpaceOfMap(*map));
 
   const std::expected<Result, Error> result =
-    localiser.localise(measured, kRangeMax);
+    localiser.localise(measured, kRangeMin, kRangeMax);
 
   ASSERT_TRUE(result.has_value())
     << "the scan was cast from this very map at a pose inside the room, at "
@@ -1017,7 +1215,7 @@ TEST(Localiser, AScanShorterThanTheMatcherAsksForIsRefused)
   const std::vector<double> too_short(kRayCount / 36U, 1.0);
 
   const std::expected<Result, Error> result =
-    localiser.localise(too_short, kRangeMax);
+    localiser.localise(too_short, kRangeMin, kRangeMax);
 
   ASSERT_FALSE(result.has_value())
     << "the matcher is set to " << kRayCount << " rays and the scan carries "
@@ -1070,7 +1268,7 @@ TEST(Localiser, AScanTheSeamHasNoBusinessRefusingIsRefusedByNeitherLayer)
   const Localiser localiser(parameters, map, freeSpaceOfMap(*map));
 
   const std::expected<Result, Error> library =
-    localiser.localise(ranges, kRangeMax);
+    localiser.localise(ranges, kRangeMin, kRangeMax);
 
   const bool library_called_it_short = !library.has_value() &&
     library.error().reason == Error::Reason::scan_too_short;
@@ -1120,7 +1318,7 @@ TEST(Localiser, AScanWithNoUsableRangeIsRefused)
   const std::vector<double> unusable(kRayCount, 0.0);
 
   const std::expected<Result, Error> result =
-    localiser.localise(unusable, kRangeMax);
+    localiser.localise(unusable, kRangeMin, kRangeMax);
 
   ASSERT_FALSE(result.has_value())
     << "every ray of the scan is zero, which is one of the three ways a lidar "
@@ -1148,9 +1346,9 @@ TEST(Localiser, EveryLocalisationOfTheSameScanGivesTheSameAnswer)
   const Localiser localiser(parametersOf(kTopK), map, freeSpaceOfMap(*map));
 
   const std::expected<Result, Error> first =
-    localiser.localise(measured, kRangeMax);
+    localiser.localise(measured, kRangeMin, kRangeMax);
   const std::expected<Result, Error> second =
-    localiser.localise(measured, kRangeMax);
+    localiser.localise(measured, kRangeMin, kRangeMax);
 
   ASSERT_TRUE(first.has_value());
   ASSERT_TRUE(second.has_value());
@@ -1168,7 +1366,7 @@ TEST(Localiser, EveryLocalisationOfTheSameScanGivesTheSameAnswer)
     parametersOf(kTopK), map, freeSpaceOfMap(*map));
 
   const std::expected<Result, Error> elsewhere =
-    second_localiser.localise(measured, kRangeMax);
+    second_localiser.localise(measured, kRangeMin, kRangeMax);
 
   ASSERT_TRUE(elsewhere.has_value());
 
@@ -1178,6 +1376,156 @@ TEST(Localiser, EveryLocalisationOfTheSameScanGivesTheSameAnswer)
     << "configuration alone.";
   EXPECT_EQ(elsewhere->pose.y, first->pose.y);
   EXPECT_EQ(elsewhere->pose.t, first->pose.t);
+}
+
+/**
+ * @brief The other refinement repeats itself, over a call and over a localiser.
+ * @details The solver underneath keeps its context stack, the counters that go
+ * with it and every matrix it has ever allocated in process globals, and reuses
+ * them from one call to the next. Its own header says none of that shows in the
+ * answers. This is what holds it to that from the level above: ten survivors
+ * are refined by it in the first run and ten more in the second, so the second
+ * run's calls all follow calls that have already been made, and the two answers
+ * are required to agree to the last bit rather than to a tolerance.
+ * A third run is made through a localiser of its own, built from the same
+ * parameters over the same map, so that what is being repeated is the
+ * configuration rather than one object's history.
+ * @remark The neighbouring case asks the same of the matcher. The two are kept
+ * apart because a refinement carrying process wide state is a different claim
+ * from one carrying none, and a single case over both would say which of them
+ * broke it only by which line failed.
+ */
+TEST(Localiser, EveryLocalisationRefinedByIcpOfTheSameScanGivesTheSameAnswer)
+{
+  const GridFixture fixture = readGrid("pillar_room_grid_fine.csv");
+  const std::shared_ptr<const OccupancyGridMap> map = mapOf(fixture);
+  ASSERT_NE(map, nullptr);
+
+  const std::vector<Pose> room_poses = readTruth(kTruthFixture);
+  ASSERT_FALSE(room_poses.empty())
+    << "the truth fixture " << kTruthFixture << " named no pose, so there is "
+    << "no pose to cast the measurement from.";
+
+  const Pose truth = worldFromRoom(*map, fixture.origin_yaw, room_poses[0]);
+  ASSERT_TRUE(map->isFree(truth.x, truth.y));
+
+  const std::vector<double> measured = map->ranges(truth, kRayCount, kRangeMax);
+
+  const std::vector<Pose> hypotheses{truth};
+
+  const Localiser localiser(
+    parametersRefiningByIcp(kTopK), map, freeSpaceOfMap(*map));
+
+  const std::expected<Result, Error> first =
+    localiser.localise(measured, kRangeMin, kRangeMax, hypotheses);
+  const std::expected<Result, Error> second =
+    localiser.localise(measured, kRangeMin, kRangeMax, hypotheses);
+
+  ASSERT_TRUE(first.has_value());
+  ASSERT_TRUE(second.has_value());
+
+  EXPECT_EQ(first->pose.x, second->pose.x)
+    << "the same scan localised twice by the same localiser gave "
+    << first->pose.x << " and then " << second->pose.x << ". The solver "
+    << "underneath carries every matrix it has allocated from one call to the "
+    << "next, and a difference here is that state reaching an answer.";
+  EXPECT_EQ(first->pose.y, second->pose.y);
+  EXPECT_EQ(first->pose.t, second->pose.t);
+
+  const Localiser second_localiser(
+    parametersRefiningByIcp(kTopK), map, freeSpaceOfMap(*map));
+
+  const std::expected<Result, Error> elsewhere =
+    second_localiser.localise(measured, kRangeMin, kRangeMax, hypotheses);
+
+  ASSERT_TRUE(elsewhere.has_value());
+
+  EXPECT_EQ(elsewhere->pose.x, first->pose.x)
+    << "a second localiser built from the same parameters and the same map "
+    << "answered differently, so a run through this refinement cannot be "
+    << "repeated from its own configuration alone.";
+  EXPECT_EQ(elsewhere->pose.y, first->pose.y);
+  EXPECT_EQ(elsewhere->pose.t, first->pose.t);
+}
+
+/**
+ * @brief A run whose every survivor the other refinement refused is refused,
+ * and the count is kept under that refinement's own reasons.
+ * @details The reference casts nothing from anywhere and calls every position
+ * free, which is what leaves the measurement perfectly good and the cast it is
+ * to be matched against carrying not one usable point. The solver refuses such
+ * a pair on its own account, which is the one refusal of the six that is the
+ * solver's rather than the library's, and every survivor earns it.
+ * **What the two counts are for.** The two refinements refuse for reasons that
+ * do not correspond, so a run keeps a count per refinement rather than one
+ * count between them. One refinement runs per localisation, so at most one of
+ * the two can carry anything, and this case asserts both halves of that: ten
+ * under the reason the refinement that ran gave, and nothing at all under the
+ * matcher's, which was never asked. A count put in the wrong map would read as
+ * a matcher that refused ten survivors of a run it took no part in.
+ * **Why ten.** One hypothesis at `da` orientations is thirty two candidates and
+ * `top_k_caers` of them are refined, which is ten, so ten survivors reach the
+ * refinement and every one of them is refused once.
+ */
+TEST(Localiser, EverySurvivorRefusedByTheIcpRefinementIsCountedUnderItsReasons)
+{
+  const std::shared_ptr<const FSM::GridReference> reference =
+    std::make_shared<const FreeEverywhereCastingNothing>();
+
+  const Pose standing{.x = 1.0, .y = 2.0, .t = 0.3};
+
+  std::vector<double> measured(kRayCount);
+  for (unsigned int i = 0; i < kRayCount; i++)
+    measured[i] = 2.0 + std::sin(3.0 * i * 2*M_PI / kRayCount);
+
+  ASSERT_TRUE(std::ranges::all_of(measured,
+      [](const double range) { return range > 0.0; }))
+    << "the measurement must be one the refinement can carry every ray of into "
+    << "a match, so that what it refuses is the cast and not the scan.";
+
+  FreeSpace free_space;
+  free_space.resolution = 0.05;
+  free_space.cells.push_back(Point{.x = standing.x, .y = standing.y});
+
+  const Localiser localiser(
+    parametersRefiningByIcp(kTopK), reference, free_space);
+
+  const std::vector<Pose> hypotheses{standing};
+
+  const std::expected<Result, Error> result =
+    localiser.localise(measured, kRangeMin, kRangeMax, hypotheses);
+
+  ASSERT_FALSE(result.has_value())
+    << "every survivor was refused by the refinement, so not one corrected "
+    << "pose came back and there is nothing to select between.";
+
+  EXPECT_EQ(result.error().reason, Error::Reason::every_survivor_refused);
+
+  EXPECT_TRUE(result.error().refusals.empty())
+    << "the matcher took no part in this run and its own count of refusals "
+    << "must therefore be empty. A refusal of one refinement counted under the "
+    << "other's reasons is not the same fact written differently.";
+
+  const std::map<IcpError, unsigned int>& icp_refusals =
+    result.error().icp_refusals;
+
+  ASSERT_EQ(icp_refusals.size(), 1u)
+    << "every survivor was refused for the same thing, a reference with no "
+    << "usable point in it, so exactly one reason may be counted.";
+
+  ASSERT_EQ(icp_refusals.count(IcpError::matching_failed), 1u)
+    << "the scan handed in is good and its length is one the solver takes, so "
+    << "the five refusals the library settles before the solver is reached are "
+    << "all passed and what is left is the solver's own.";
+
+  const std::size_t candidates = hypotheses.size() * kOrientations;
+  const std::size_t survivors = std::min<std::size_t>(kTopK, candidates);
+
+  EXPECT_EQ(icp_refusals.at(IcpError::matching_failed), survivors)
+    << "the refinement was handed " << survivors << " survivors, being the "
+    << "smaller of " << kTopK << " and the " << candidates << " candidates "
+    << "one hypothesis at " << kOrientations << " orientations yields, and "
+    << "every one of them was refused, so every one of them must be counted.";
 }
 
 TEST(Localiser, EverySurvivorRefusedByTheMatcherRefusesTheRun)
@@ -1211,7 +1559,7 @@ TEST(Localiser, EverySurvivorRefusedByTheMatcherRefusesTheRun)
   const Localiser localiser(parametersOf(kTopK), map, freeSpaceOfMap(*map));
 
   const std::expected<Result, Error> result =
-    localiser.localise(measured, kRangeMax, in_the_wall);
+    localiser.localise(measured, kRangeMin, kRangeMax, in_the_wall);
 
   ASSERT_FALSE(result.has_value())
     << "every hypothesis handed in stands inside the room's wall, so the "
@@ -1267,7 +1615,7 @@ TEST(Localiser, TheHypothesesDrawnAreTheHypothesesSearched)
   ASSERT_GT(drawn, 0u);
 
   const std::expected<Result, Error> result =
-    localiser.localise(measured, kRangeMax);
+    localiser.localise(measured, kRangeMin, kRangeMax);
 
   ASSERT_TRUE(result.has_value());
 
@@ -1282,6 +1630,116 @@ TEST(Localiser, TheHypothesesDrawnAreTheHypothesesSearched)
   EXPECT_GT(result->execution_time, 0.0)
     << "a run that took no measurable time did not happen. The execution time "
     << "is what a host reports and what the two builds are compared on.";
+}
+
+/**
+ * @brief The scan's near bound reaches the other refinement and reaches
+ * nothing else.
+ * @details The two refinements read a different set of the arguments a
+ * localisation is given, and this is the one argument they disagree about. The
+ * sift, the matcher and the selection each judge a reading by the matcher's own
+ * test of it, which knows no lower bound at all, so a run refined by the
+ * matcher gives the same answer whatever near bound it is handed. The other
+ * refinement marks a reading under that bound unusable rather than treating it
+ * as a distance, and a bound above every reading of a scan therefore leaves it
+ * nothing to match.
+ * The bound is not written down. It is the longest reading the scan carries
+ * plus a metre, computed in the case from the scan itself, so it is above every
+ * reading by construction on any room and at any resolution.
+ * **What this case is really for.** Every other case here that refines by
+ * iterative closest point would also pass were the refinement chosen wrongly
+ * and the matcher run in its place, both refinements recovering the same pose
+ * from the same room. This one cannot: the same map, the same measurement, the
+ * same hypothesis and the same near bound go to both, and one answers while the
+ * other refuses. So it is what holds the choice of refinement to the one field
+ * that makes it, rather than only holding what happens afterwards.
+ * @remark The refusal is `scan_entirely_invalid` rather than the solver's own,
+ * and it is settled before the map is cast from at all. The reason matters:
+ * a host reading it is told the scan it sent was unusable at the bound it
+ * declared, which is a thing to correct, rather than that a match failed, which
+ * is not.
+ */
+TEST(Localiser, TheNearBoundIsReadByTheIcpRefinementAndByNoOtherStage)
+{
+  const GridFixture fixture = readGrid("pillar_room_grid_fine.csv");
+  const std::shared_ptr<const OccupancyGridMap> map = mapOf(fixture);
+  ASSERT_NE(map, nullptr);
+
+  const std::vector<Pose> room_poses = readTruth(kTruthFixture);
+  ASSERT_FALSE(room_poses.empty())
+    << "the truth fixture " << kTruthFixture << " named no pose, so there is "
+    << "no pose to cast the measurement from.";
+
+  const Pose truth = worldFromRoom(*map, fixture.origin_yaw, room_poses[0]);
+  ASSERT_TRUE(map->isFree(truth.x, truth.y));
+
+  const std::vector<double> measured = map->ranges(truth, kRayCount, kRangeMax);
+
+  const double furthest = *std::ranges::max_element(measured);
+  const double above_every_reading = furthest + 1.0;
+
+  ASSERT_LT(furthest, above_every_reading)
+    << "the near bound this case hands in has to stand above the longest "
+    << "reading the scan carries, or the refinement is left something to match "
+    << "and the case is about nothing.";
+
+  const std::vector<Pose> hypotheses{truth};
+
+  const Localiser by_the_matcher(
+    parametersOf(kTopK), map, freeSpaceOfMap(*map));
+
+  const std::expected<Result, Error> at_no_bound =
+    by_the_matcher.localise(measured, kRangeMin, kRangeMax, hypotheses);
+
+  const std::expected<Result, Error> at_a_bound_above_everything =
+    by_the_matcher.localise(measured, above_every_reading, kRangeMax,
+      hypotheses);
+
+  ASSERT_TRUE(at_no_bound.has_value());
+  ASSERT_TRUE(at_a_bound_above_everything.has_value())
+    << "a run refined by the matcher never reads the near bound, so raising it "
+    << "above every reading of the scan cannot stop it answering.";
+
+  EXPECT_EQ(at_a_bound_above_everything->pose.x, at_no_bound->pose.x)
+    << "the same run refined by the matcher at two different near bounds gave "
+    << "two different answers, so the bound reached a stage that is documented "
+    << "as never reading it.";
+  EXPECT_EQ(at_a_bound_above_everything->pose.y, at_no_bound->pose.y);
+  EXPECT_EQ(at_a_bound_above_everything->pose.t, at_no_bound->pose.t);
+
+  const Localiser by_icp(
+    parametersRefiningByIcp(kTopK), map, freeSpaceOfMap(*map));
+
+  const std::expected<Result, Error> refused =
+    by_icp.localise(measured, above_every_reading, kRangeMax, hypotheses);
+
+  ASSERT_FALSE(refused.has_value())
+    << "every reading of the scan sits under the near bound it was handed, so "
+    << "the other refinement carries not one of them into a match as a "
+    << "distance and has nothing left to refine any survivor against.";
+
+  EXPECT_EQ(refused.error().reason, Error::Reason::every_survivor_refused);
+
+  EXPECT_TRUE(refused.error().refusals.empty())
+    << "the matcher took no part in the run that was refused, so a count under "
+    << "its reasons would name a stage that never ran.";
+
+  const std::map<IcpError, unsigned int>& icp_refusals =
+    refused.error().icp_refusals;
+
+  ASSERT_EQ(icp_refusals.count(IcpError::scan_entirely_invalid), 1u)
+    << "the scan is refused for carrying no usable reading, which is settled "
+    << "before the map is cast from, rather than for a match the solver could "
+    << "not make.";
+
+  const std::size_t candidates = hypotheses.size() * kOrientations;
+  const std::size_t survivors = std::min<std::size_t>(kTopK, candidates);
+
+  EXPECT_EQ(icp_refusals.at(IcpError::scan_entirely_invalid), survivors)
+    << "the refinement was handed " << survivors << " survivors, being the "
+    << "smaller of " << kTopK << " and the " << candidates << " candidates "
+    << "one hypothesis at " << kOrientations << " orientations yields, and "
+    << "each of them was refused over the same unusable scan.";
 }
 
 TEST_P(LocaliserOnAFineGrid, APoseIsRecoveredFromAScanTheMapNeverCast)
@@ -1316,7 +1774,7 @@ TEST_P(LocaliserOnAFineGrid, APoseIsRecoveredFromAScanTheMapNeverCast)
     ASSERT_TRUE(map->isFree(truth.x, truth.y));
 
     const std::expected<Result, Error> result =
-      localiser.localise(scans[s], kRangeMax);
+      localiser.localise(scans[s], kRangeMin, kRangeMax);
 
     ASSERT_TRUE(result.has_value())
       << "scan " << s << " on the " << grid.label << " grid produced no pose "
@@ -1374,7 +1832,7 @@ TEST_P(LocaliserOnEveryGrid, APoseIsRecoveredFromAScanTheMapItselfCast)
       map->ranges(truth, kRayCount, kRangeMax);
 
     const std::expected<Result, Error> result =
-      localiser.localise(measured, kRangeMax);
+      localiser.localise(measured, kRangeMin, kRangeMax);
 
     ASSERT_TRUE(result.has_value())
       << "the measurement was cast from this very map at truth pose " << s
@@ -1466,7 +1924,7 @@ TEST_P(LocaliserOnEveryGrid, ATranslationBoundBelowACellSpendsTheRecoveryBudget)
   const Localiser generous(parametersOf(kTopK), map, freeSpaceOfMap(*map));
 
   const std::expected<Result, Error> control =
-    generous.localise(measured, kRangeMax);
+    generous.localise(measured, kRangeMin, kRangeMax);
 
   ASSERT_TRUE(control.has_value())
     << "the control run, at the bound this package ships, produced no pose on "
@@ -1489,7 +1947,7 @@ TEST_P(LocaliserOnEveryGrid, ATranslationBoundBelowACellSpendsTheRecoveryBudget)
   const Localiser tight(bounded, map, freeSpaceOfMap(*map));
 
   const std::expected<Result, Error> result =
-    tight.localise(measured, kRangeMax);
+    tight.localise(measured, kRangeMin, kRangeMax);
 
   const std::map<CorrectionError, unsigned int>& refusals =
     result.has_value() ? result->refusals : result.error().refusals;
@@ -1572,7 +2030,7 @@ TEST_P(ScanRefusalSeam, AScanRefusedHereIsRefusedByTheMatcherForTheSameThing)
   const std::vector<double> ranges(seam.rays, seam.range);
 
   const std::expected<Result, Error> library =
-    localiser.localise(ranges, kRangeMax);
+    localiser.localise(ranges, kRangeMin, kRangeMax);
 
   ASSERT_FALSE(library.has_value())
     << "a scan of " << seam.rays << " rays, each of them " << seam.range

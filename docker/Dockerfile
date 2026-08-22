@@ -104,6 +104,14 @@ COPY --chown=${USER}:${USER} fsm-localisation/fsm_localisation/ /home/${USER}/ro
 # patch makes the file name the shared library, and changes nothing else
 # about it.
 #
+# The matcher's own licence text is installed beside the library. Upstream's
+# install rules copy headers and a manifest and no licence at all, so
+# without this the image would carry the library with nothing saying what
+# covers it. LGPL v3 asks for the licence text to travel with the work, and
+# the image is how the work travels here. The GPL v3 text that the same
+# clause asks for is already on the image, brought in by the package
+# manager with CGAL.
+#
 # The optimisation flag is passed by hand rather than by asking for a
 # release build. The matcher's own build file sets no flags and names no
 # default build type, so configuring it without one compiles the whole
@@ -137,6 +145,8 @@ RUN sudo apt-get -y update                                                     &
       -DCMAKE_INSTALL_PREFIX=/usr/local                                        && \
     cmake --build /tmp/csm/build                                               && \
     sudo cmake --install /tmp/csm/build                                        && \
+    sudo install -Dm644 /tmp/csm/LICENSE.txt                            \
+      /usr/local/share/licenses/csm/LICENSE.txt                            && \
     sudo rm -f /usr/local/lib/libcsm-static.a                                  && \
     sudo ldconfig                                                              && \
     rm -rf /tmp/csm /tmp/csm-patches

@@ -76,8 +76,22 @@ what has to refuse an unknown one, and it has to refuse it in the same words the
 rest do. That is why the caster case is here rather than among the library's own
 parameter cases.
 
+**Two of the cases are about which algorithm refines a survivor.** One names an
+algorithm that is neither of the two there are. The other names the iterative
+closest point refinement, correctly, and then puts one of the twenty six
+settings that refinement reads outside its range.
+
+The second needs the first to say `icp`, and this is the whole reason it is
+written as two settings rather than one. Those twenty six are declared only
+where that refinement is the one chosen, and an override naming a setting the
+node never declared is ignored without a word, so a bad `sigma` on its own
+starts a node rather than stopping one. The node settles the name of the
+refinement first and reads the settings that go with it second, which is why
+the sentence this case waits for names `sigma` and the value it was given
+rather than the refinement that led there.
+
 **The processes are held in a module of their own rather than asked for one at a
-time.** There are thirteen of them, and naming each as an argument of each case,
+time.** There are fifteen of them, and naming each as an argument of each case,
 twice over, would be a page of names before the first assertion. They are the
 same objects the launch description carries.
 """
@@ -101,11 +115,15 @@ CASES = {
     'bad_dl': ({'dl': -2.5}, ('dl', '-2.5')),
     'bad_frame': ({'fixed_frame_id': '/map'},
                   ('fixed_frame_id', '/map')),
+    'bad_icp_setting': ({'refinement_method': 'icp', 'sigma': -0.01},
+                        ('sigma', '-0.01')),
     'bad_map_file': ({'map_topic': '', 'map_file': '/nowhere/room.yaml'},
                      ('/nowhere/room.yaml',)),
     'bad_output_topic': ({'output_pose_topic': ''},
                          ('output_pose_topic', 'must name a topic')),
     'bad_ray_search': ({'ray_search': 'spiral'}, ('ray_search', 'spiral')),
+    'bad_refinement': ({'refinement_method': 'kalman'},
+                       ('refinement_method', 'kalman')),
     'bad_reliability': ({'scan_qos_reliability': 'best'},
                         ('scan_qos_reliability', 'best')),
     'bad_threshold': ({'occupancy_threshold': 101},

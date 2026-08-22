@@ -30,6 +30,7 @@
 #include <cstdint>
 #include <format>
 #include <functional>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <utility>
@@ -47,17 +48,23 @@ namespace cbgl
 namespace
 {
 /**
- * @brief What is wrong with a scan's own angles, for a matcher that reads ray
- * zero at minus pi and reads the rays as spanning exactly one turn.
- * @details This package localises panoramic sensors and nothing else, and the
- * angles a scan carries are the only place it says whether it is one. A scan
- * whose first ray sits somewhere else is a legal scan and a wrong answer here,
- * rotated by whatever the two conventions differ by, so it is refused rather
- * than read as though it agreed. A ray of slack is allowed on both, which is
- * more than the rounding of a float and less than a ray.
- * @return an empty string when the scan is panoramic and begins where it is
- * read as beginning, otherwise a sentence naming the field and the value it
- * carried.
+ * @brief What is wrong with a scan's own angles, for an algorithm that reads a
+ * scan as centred on the sensor's heading.
+ * @details The angles a scan carries are the only place it says what aperture
+ * it was taken at, and the algorithm below reads the middle window of a cast
+ * against it. A scan whose first ray sits somewhere other than half its own
+ * span behind the heading is a legal scan and a wrong answer here, rotated by
+ * whatever the two conventions differ by, so it is refused rather than read as
+ * though it agreed. A ray of slack is allowed, which is more than the rounding
+ * of a float and less than a ray.
+ * A scan spanning less than a turn is accepted. It was not before: this
+ * package localised panoramic sensors and nothing else, and a narrower one was
+ * refused here rather than answered wrongly. What supports it now is the
+ * window in the sift and in the refinement, which cast a whole turn at the
+ * sensor's own angular resolution and compare only the part of it the sensor
+ * could have seen.
+ * @return an empty string when the scan's angles are ones this can read,
+ * otherwise a sentence naming the field and the value it carried.
  */
 std::string anglesProblemOf(const sensor_msgs::msg::LaserScan& scan)
 {
@@ -66,18 +73,32 @@ std::string anglesProblemOf(const sensor_msgs::msg::LaserScan& scan)
   const double slack = std::abs(increment) > 0.0
     ? std::abs(increment) : 2.0 * M_PI / std::max(1.0, rays);
 
-  if (std::abs(FSM::Utils::wrapAngle(scan.angle_min + M_PI)) > slack)
+  if (!(increment > 0.0))
   {
-    return std::format("the scan carries angle_min {}, where every ray of it "
-      "is read from -pi onwards. This package localises panoramic scans only",
-      scan.angle_min);
+    return std::format("the scan carries angle_increment {}, which is not a "
+      "spacing rays can be laid out at", increment);
   }
 
-  if (std::abs(rays * increment - 2.0 * M_PI) > slack)
+  const double aperture = rays * increment;
+
+  if (aperture > 2.0 * M_PI + slack)
   {
     return std::format("the scan carries {} ranges at angle_increment {}, "
-      "which spans {} radians rather than a full turn. This package localises "
-      "panoramic scans only", scan.ranges.size(), increment, rays * increment);
+      "which spans {} radians, more than a full turn. A ray of such a scan "
+      "would be read twice", scan.ranges.size(), increment, aperture);
+  }
+
+  // Half the aperture, not half of one ray fewer. A panoramic scan of n rays
+  // begins at exactly -pi under this convention, which is what every recording
+  // this package is driven from carries and what its own sift assumes when it
+  // reads a cast's first ray as sitting half a turn behind the heading.
+  const double expected_min = -0.5 * aperture;
+
+  if (std::abs(FSM::Utils::wrapAngle(scan.angle_min - expected_min)) > slack)
+  {
+    return std::format("the scan carries angle_min {}, where a scan spanning "
+      "{} radians is read as centred on the sensor's heading and therefore as "
+      "beginning at {}", scan.angle_min, aperture, expected_min);
   }
 
   return {};
@@ -106,6 +127,23 @@ Pose compose(const Pose& a, const Pose& b)
  * same words as every other refusal, rather than turned into a run nobody asked
  * for.
  */
+int wholeOf(const rclcpp::Node& node, const std::string& name)
+{
+  const std::int64_t value = node.get_parameter(name).as_int();
+
+  if (value < std::numeric_limits<int>::min() ||
+    value > std::numeric_limits<int>::max())
+  {
+    const std::string problem = std::format(
+      "{} must lie between {} and {}, got {}", name,
+      std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), value);
+    RCLCPP_FATAL(node.get_logger(), "Refusing to start: %s", problem.c_str());
+    throw std::invalid_argument(problem);
+  }
+
+  return static_cast<int>(value);
+}
+
 unsigned int countOf(const rclcpp::Node& node, const std::string& name)
 {
   const std::int64_t value = node.get_parameter(name).as_int();
@@ -228,27 +266,67 @@ std::string sentenceOf(const fsm_localisation::CorrectionError error)
 }
 
 /**
+ * @brief What the iterative closest point refinement's refusal of one survivor
+ * amounts to, as a phrase a count can be put in front of.
+ * @remark The solver's own refusal is one of the six and the other five are
+ * settled before it is reached, so a phrase here names what was wrong with the
+ * scan rather than restating that a match failed.
+ */
+std::string sentenceOf(const IcpError error)
+{
+  switch (error)
+  {
+    case IcpError::cast_length_mismatch:
+      return "a cast from the map that came back at some length other than "
+        "the one it was asked for";
+    case IcpError::matching_failed:
+      return "a match the solver could hold too few correspondences for";
+    case IcpError::scan_empty:
+      return "a scan carrying no range at all";
+    case IcpError::scan_entirely_invalid:
+      return "a scan carrying no usable range";
+    case IcpError::scan_too_long:
+      return "a scan carrying more ranges than the solver will match";
+    case IcpError::scan_too_short:
+      return "a scan carrying fewer ranges than the solver will match";
+  }
+
+  return "a refusal the refinement did not name";
+}
+
+/**
  * @brief Why the library produced no pose, in words a caller can act on.
  * @details The two reasons that carry per survivor counts say how many
  * survivors went each way, since which way the refinement failed is what tells
  * a badly bounded search from a map the sensor cannot see anything in.
+ * @remark Both counts are walked, though one refinement runs per localisation
+ * and only one of the two can carry anything. Which of them it is belongs to
+ * the settings and not to this sentence, and asking which was configured to
+ * decide which to read would be a second place for that answer to live.
  */
 std::string sentenceOf(const Error& error)
 {
   std::string counted;
 
-  for (const auto& [reason, count] : error.refusals)
-  {
-    counted += std::format("{}{} for {}", counted.empty() ? "" : ", ", count,
-      sentenceOf(reason));
-  }
+  const auto count = [&counted](const auto& refusals)
+    {
+      for (const auto& [reason, refused] : refusals)
+      {
+        counted += std::format("{}{} for {}", counted.empty() ? "" : ", ",
+          refused, sentenceOf(reason));
+      }
+    };
+
+  count(error.refusals);
+  count(error.icp_refusals);
 
   const std::string counts = counted.empty() ? "" : ": " + counted;
 
   switch (error.reason)
   {
     case Error::Reason::every_survivor_refused:
-      return "the matcher refused every survivor of the sift" + counts;
+      return std::format("the {} refused every survivor of the sift",
+        error.icp_refusals.empty() ? "matcher" : "solver") + counts;
     case Error::Reason::map_has_no_free_space:
       return "the map carries no free cell, so there is nowhere to place a "
         "hypothesis";
@@ -341,6 +419,30 @@ Interface::Interface(const rclcpp::NodeOptions& options)
   }
 
   casting_method_ = *method;
+
+  const std::string refinement =
+    get_parameter("refinement_method").as_string();
+
+  if (refinement != "fsm" && refinement != "icp")
+  {
+    const std::string problem = std::format(
+      "refinement_method must be \"fsm\" or \"icp\", got \"{}\"", refinement);
+    RCLCPP_FATAL(get_logger(), "Refusing to start: %s", problem.c_str());
+    throw std::invalid_argument(problem);
+  }
+
+  if (refinement == "icp")
+  {
+    declareIcpParameters();
+    parameters_.icp = readIcpParameters();
+
+    if (const std::string problem = validate(*parameters_.icp);
+      !problem.empty())
+    {
+      RCLCPP_FATAL(get_logger(), "Refusing to start: %s", problem.c_str());
+      throw std::invalid_argument(problem);
+    }
+  }
 
   const std::string reliability =
     get_parameter("scan_qos_reliability").as_string();
@@ -543,9 +645,72 @@ Interface::Interface(const rclcpp::NodeOptions& options)
       std::placeholders::_2),
     rclcpp::ServicesQoS(), service_group_);
 
+  RCLCPP_INFO(get_logger(), "Refining by %s",
+    parameters_.icp.has_value()
+      ? "the point to line solver, csm"
+      : "the panoramic scan matcher, fsm_localisation");
+
   RCLCPP_INFO(get_logger(),
     "Standing by. To localise issue ros2 service call "
     "%s/global_localisation std_srvs/srv/Trigger", get_name());
+}
+
+/**
+ * @details Each setting carries the name the ROS 1 build reads it by and the
+ * value `IcpParameters` falls back to where it is not given one, taken from a
+ * default constructed set rather than written out a second time here, so that
+ * the two cannot drift apart. What that build's own settings file sets is
+ * another matter: those are a tuning of this solver rather than its defaults,
+ * and a run meaning to reproduce them sets them.
+ * @remark These reach a solver that judges none of them, so
+ * `cbgl::validate(const IcpParameters&)` is called on what comes back before a
+ * localiser is built from it.
+ */
+void Interface::declareIcpParameters()
+{
+  const IcpParameters defaults;
+
+  declare_parameter("clustering_threshold", defaults.clustering_threshold,
+    readOnly());
+  declare_parameter("debug_verify_tricks", defaults.debug_verify_tricks,
+    readOnly());
+  declare_parameter("do_alpha_test", defaults.do_alpha_test, readOnly());
+  declare_parameter("do_alpha_test_thresholdDeg",
+    defaults.do_alpha_test_thresholdDeg, readOnly());
+  declare_parameter("do_compute_covariance", defaults.do_compute_covariance,
+    readOnly());
+  declare_parameter("do_visibility_test", defaults.do_visibility_test,
+    readOnly());
+  declare_parameter("epsilon_theta", defaults.epsilon_theta, readOnly());
+  declare_parameter("epsilon_xy", defaults.epsilon_xy, readOnly());
+  declare_parameter("max_angular_correction_deg",
+    defaults.max_angular_correction_deg, readOnly());
+  declare_parameter("max_correspondence_dist",
+    defaults.max_correspondence_dist, readOnly());
+  declare_parameter("max_iterations", defaults.max_iterations, readOnly());
+  declare_parameter("max_linear_correction", defaults.max_linear_correction,
+    readOnly());
+  declare_parameter("orientation_neighbourhood",
+    defaults.orientation_neighbourhood, readOnly());
+  declare_parameter("outliers_adaptive_mult", defaults.outliers_adaptive_mult,
+    readOnly());
+  declare_parameter("outliers_adaptive_order",
+    defaults.outliers_adaptive_order, readOnly());
+  declare_parameter("outliers_maxPerc", defaults.outliers_maxPerc, readOnly());
+  declare_parameter("outliers_remove_doubles",
+    defaults.outliers_remove_doubles, readOnly());
+  declare_parameter("restart", defaults.restart, readOnly());
+  declare_parameter("restart_dt", defaults.restart_dt, readOnly());
+  declare_parameter("restart_dtheta", defaults.restart_dtheta, readOnly());
+  declare_parameter("restart_threshold_mean_error",
+    defaults.restart_threshold_mean_error, readOnly());
+  declare_parameter("sigma", defaults.sigma, readOnly());
+  declare_parameter("use_corr_tricks", defaults.use_corr_tricks, readOnly());
+  declare_parameter("use_ml_weights", defaults.use_ml_weights, readOnly());
+  declare_parameter("use_point_to_line_distance",
+    defaults.use_point_to_line_distance, readOnly());
+  declare_parameter("use_sigma_weights", defaults.use_sigma_weights,
+    readOnly());
 }
 
 void Interface::declareParameters()
@@ -574,6 +739,8 @@ void Interface::declareParameters()
   declare_parameter("num_threads", 0, readOnly());
   declare_parameter("occupancy_threshold", 65, readOnly());
   declare_parameter("map_scan_method", "ray_marching", readOnly());
+
+  declare_parameter("refinement_method", "fsm", readOnly());
 
   declare_parameter("size_scan", 0, readOnly());
   declare_parameter("min_magnification_size", 0, readOnly());
@@ -719,7 +886,7 @@ void Interface::localiseOnce(std_srvs::srv::Trigger::Response& outcome)
   const std::vector<Pose> hypotheses = localiser->disperse();
 
   const std::expected<Result, Error> result =
-    localiser->localise(ranges, scan->range_max, hypotheses);
+    localiser->localise(ranges, scan->range_min, scan->range_max, hypotheses);
 
   if (!result.has_value())
   {
@@ -756,6 +923,19 @@ void Interface::localiseOnce(std_srvs::srv::Trigger::Response& outcome)
   for (const auto& [reason, count] : result->refusals)
     refused += count;
 
+  for (const auto& [reason, count] : result->icp_refusals)
+    refused += count;
+
+  /**
+   * @remark The word "matcher" here names the panoramic scan matcher and is
+   * wrong whenever the point to line solver did the work. It stays because it
+   * is not only a sentence: the harness that measures this package reads these
+   * counts out of this reply by matching this wording, so changing it here
+   * alone loses three columns of every recorded trial silently, which is worse
+   * than a word being wrong. Change it there and here together or not at all.
+   * The refusal sentence carries no such reader and does say which refined.
+   * Which one ran is reported once at start up, so a log attributes a run.
+   */
   outcome.success = true;
   outcome.message = std::format(
     "localised in {:.0f} ms: {} candidates scored, {} survivors handed to the "
@@ -947,6 +1127,59 @@ void Interface::publishTransform(const Pose& robot, const Pose& odom_in_robot,
   message.transform.rotation.w = quaternion.w();
 
   transform_broadcaster_->sendTransform(message);
+}
+
+/**
+ * @details Read into the very struct the declarations took their defaults
+ * from, under the same names, so that a setting reaches the solver by one
+ * route and is named the same at both ends of it.
+ */
+IcpParameters Interface::readIcpParameters()
+{
+  IcpParameters parameters;
+
+  parameters.clustering_threshold =
+    get_parameter("clustering_threshold").as_double();
+  parameters.debug_verify_tricks =
+    get_parameter("debug_verify_tricks").as_bool();
+  parameters.do_alpha_test = get_parameter("do_alpha_test").as_bool();
+  parameters.do_alpha_test_thresholdDeg =
+    get_parameter("do_alpha_test_thresholdDeg").as_double();
+  parameters.do_compute_covariance =
+    get_parameter("do_compute_covariance").as_bool();
+  parameters.do_visibility_test =
+    get_parameter("do_visibility_test").as_bool();
+  parameters.epsilon_theta = get_parameter("epsilon_theta").as_double();
+  parameters.epsilon_xy = get_parameter("epsilon_xy").as_double();
+  parameters.max_angular_correction_deg =
+    get_parameter("max_angular_correction_deg").as_double();
+  parameters.max_correspondence_dist =
+    get_parameter("max_correspondence_dist").as_double();
+  parameters.max_iterations = wholeOf(*this, "max_iterations");
+  parameters.max_linear_correction =
+    get_parameter("max_linear_correction").as_double();
+  parameters.orientation_neighbourhood =
+    wholeOf(*this, "orientation_neighbourhood");
+  parameters.outliers_adaptive_mult =
+    get_parameter("outliers_adaptive_mult").as_double();
+  parameters.outliers_adaptive_order =
+    get_parameter("outliers_adaptive_order").as_double();
+  parameters.outliers_maxPerc = get_parameter("outliers_maxPerc").as_double();
+  parameters.outliers_remove_doubles =
+    get_parameter("outliers_remove_doubles").as_bool();
+  parameters.restart = get_parameter("restart").as_bool();
+  parameters.restart_dt = get_parameter("restart_dt").as_double();
+  parameters.restart_dtheta = get_parameter("restart_dtheta").as_double();
+  parameters.restart_threshold_mean_error =
+    get_parameter("restart_threshold_mean_error").as_double();
+  parameters.sigma = get_parameter("sigma").as_double();
+  parameters.use_corr_tricks = get_parameter("use_corr_tricks").as_bool();
+  parameters.use_ml_weights = get_parameter("use_ml_weights").as_bool();
+  parameters.use_point_to_line_distance =
+    get_parameter("use_point_to_line_distance").as_bool();
+  parameters.use_sigma_weights = get_parameter("use_sigma_weights").as_bool();
+
+  return parameters;
 }
 
 /**

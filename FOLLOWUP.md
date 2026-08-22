@@ -36,11 +36,32 @@ A drawn position is the centre of a free cell. On a map of twenty centimetre cel
 
 ## What the sensor has to be
 
-### Sensors that do not see all the way round are unsupported
+### A sensor that does not see all the way round is supported, with one caveat
 
-The ROS 1 version carried two refinement paths: the scan matcher for a panoramic sensor and an ICP path for anything narrower. Only the matcher remains, so only a panoramic sensor is supported. This is inherited from `fsm_localisation`, which records the same gap.
+This was a gap and is no longer one. The map is read all the way round at the
+sensor's own angular resolution, which is more readings than the sensor
+carries, and only the middle window of that is compared: the part of the turn
+the sensor could have seen. The rotation that yields a candidate is still over
+the whole turn, so what a candidate is labelled with does not depend on the
+aperture.
 
-A scan whose first ray does not sit half a turn behind the sensor's heading, or whose rays do not span exactly one turn, is refused at the point of use rather than answered wrongly. Refusing is the honest form of the limitation: such a scan is perfectly legal, and reading it as though it began where it did not would return a confident answer rotated by half a turn.
+The caveat is the refinement. The scan matcher matches a full turn against a
+full turn and has nothing to say about a fraction of one, so a narrower sensor
+wants `refinement_method: "icp"`, which does not discriminate. Nothing refuses
+the other combination and nothing measures it either.
+
+A scan whose first ray does not sit half its own span behind the sensor's
+heading, or which claims to span more than a turn, is still refused at the
+point of use rather than answered wrongly. Refusing is the honest form of the
+limitation: such a scan is perfectly legal, and reading it as though it agreed
+with this convention would return a confident answer rotated by whatever the
+two differ by.
+
+### Interpolated rays reach the ICP solver as ordinary readings
+
+Where `size_scan` forces a subsample, the scan is interpolated across its gaps before any survivor is refined. The conversion the ICP path uses cannot tell a filled ray from a measured one: a filled ray is finite, above the near bound, below the far bound and not zero, which is every test the conversion applies. So a filled ray becomes an ordinary correspondence and carries the same weight as a measured one.
+
+The same is recorded above for the sift and the scan matcher. Whether it matters is not established either way here, and no measurement has been made of it.
 
 ## The node
 
@@ -90,7 +111,9 @@ The sift is split by hypothesis index, one thread per contiguous chunk, each wri
 
 ### The exported CMake extras file earns nothing today
 
-`cmake/cbgl-extras.cmake` guards the creation of an imported FFTW target, and that target already exists by the time the file runs, because `fsm_localisation`'s own extras file runs first through the exported dependency. The file is kept because the layout names it and because it makes the requirement a stated one rather than an accident of include order, and it costs a consumer nothing. It could go.
+`cmake/cbgl-extras.cmake` guards the creation of an imported FFTW target, and that target already exists by the time the file runs, because `fsm_localisation`'s own extras file runs first through the exported dependency. The file is kept because the layout names it and because it makes the requirement a stated one rather than an accident of include order, and it costs a consumer nothing.
+
+**It can no longer go.** It is now the only thing that creates the imported target for `csm`, which `cbgl_core` links, so every consumer that calls `find_package(cbgl)` needs it. It also carries the refusal that stops a statically built `csm` being linked, which is a licensing requirement rather than a convenience. The paragraph above described a file that earned nothing; that is no longer true of it.
 
 ### A configuration notice from CGAL cannot be removed
 

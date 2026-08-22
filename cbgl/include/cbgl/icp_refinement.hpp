@@ -21,6 +21,7 @@
 #ifndef CBGL__ICP_REFINEMENT_HPP_
 #define CBGL__ICP_REFINEMENT_HPP_
 
+#include <cmath>
 #include <expected>
 #include <memory>
 #include <span>
@@ -250,7 +251,13 @@ public:
    * carried into the match as unusable rather than as a distance.
    * @param range_max the scan's own maximum range, which is what a ray meeting
    * nothing reports. The map has never seen either bound, so both are given
-   * per refinement rather than held. A `range_max` of a hundred metres or more
+   * per refinement rather than held.
+   * @param aperture how much of a turn the scan covers, in radians. A sensor
+   * that sees all the way round is the default. A narrower one is served by
+   * casting the whole turn at the sensor's own angular resolution, which is
+   * more rays than the sensor carries, and matching against the middle window
+   * of that cast. The cast is still taken once and still at the estimate; only
+   * how much of it is used changes. A `range_max` of a hundred metres or more
    * is accepted, but no reading at or above a hundred is carried into the match
    * as a distance, because the solver refuses outright any scan that offers it
    * one. A lidar whose far bound is that high marks its own far bound usable,
@@ -267,7 +274,8 @@ public:
    * transforms before applying it. There is nothing to wrap it between here.
    */
   std::expected<IcpResult, IcpError> refine(std::span<const double> ranges,
-    const Pose& estimate, double range_min, double range_max) const;
+    const Pose& estimate, double range_min, double range_max,
+    double aperture = 2.0 * M_PI) const;
 
   const IcpParameters& parameters() const { return parameters_; }
 
