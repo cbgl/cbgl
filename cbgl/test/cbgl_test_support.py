@@ -240,8 +240,8 @@ def node_parameters(**overrides):
     configured rather than a name written into the source.
     """
     parameters = {
-        'global_frame_id': GLOBAL_FRAME,
-        'robot_frame_id': ROBOT_FRAME,
+        'fixed_frame_id': GLOBAL_FRAME,
+        'base_frame_id': ROBOT_FRAME,
         'odom_frame_id': ODOM_FRAME,
         'dl': DENSITY,
         'da': ORIENTATIONS,

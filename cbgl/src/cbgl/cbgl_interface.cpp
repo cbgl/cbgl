@@ -380,14 +380,14 @@ Interface::Interface(const rclcpp::NodeOptions& options)
 
   tf_lookup_timeout_ = rclcpp::Duration::from_seconds(timeout);
 
-  global_frame_id_ = get_parameter("global_frame_id").as_string();
+  fixed_frame_id_ = get_parameter("fixed_frame_id").as_string();
   odom_frame_id_ = get_parameter("odom_frame_id").as_string();
-  robot_frame_id_ = get_parameter("robot_frame_id").as_string();
+  base_frame_id_ = get_parameter("base_frame_id").as_string();
 
   for (const auto& [name, value] : {
-      std::pair<std::string, std::string>{"global_frame_id", global_frame_id_},
+      std::pair<std::string, std::string>{"fixed_frame_id", fixed_frame_id_},
       {"odom_frame_id", odom_frame_id_},
-      {"robot_frame_id", robot_frame_id_}})
+      {"base_frame_id", base_frame_id_}})
   {
     if (value.empty() || value.front() == '/')
     {
@@ -463,7 +463,7 @@ Interface::Interface(const rclcpp::NodeOptions& options)
     }
 
     nav_msgs::msg::OccupancyGrid map = *described;
-    map.header.frame_id = global_frame_id_;
+    map.header.frame_id = fixed_frame_id_;
 
     if (const std::string problem = takeMap(map); !problem.empty())
     {
@@ -550,8 +550,8 @@ Interface::Interface(const rclcpp::NodeOptions& options)
 
 void Interface::declareParameters()
 {
-  declare_parameter("global_frame_id", "map", readOnly());
-  declare_parameter("robot_frame_id", "base_footprint", readOnly());
+  declare_parameter("fixed_frame_id", "map", readOnly());
+  declare_parameter("base_frame_id", "base_footprint", readOnly());
   declare_parameter("odom_frame_id", "odom", readOnly());
   declare_parameter("tf_broadcast", false, readOnly());
   declare_parameter("tf_lookup_timeout", 0.1, readOnly());
@@ -706,7 +706,7 @@ void Interface::localiseOnce(std_srvs::srv::Trigger::Response& outcome)
   if (tf_broadcast_)
   {
     const std::expected<Pose, std::string> odometry_placement =
-      placementOf(odom_frame_id_, robot_frame_id_, stamp);
+      placementOf(odom_frame_id_, base_frame_id_, stamp);
 
     if (odometry_placement.has_value())
       odometry = *odometry_placement;
@@ -837,7 +837,7 @@ void Interface::publishHypotheses(const std::vector<Pose>& hypotheses,
 {
   geometry_msgs::msg::PoseArray message;
   message.header.stamp = stamp;
-  message.header.frame_id = global_frame_id_;
+  message.header.frame_id = fixed_frame_id_;
   message.poses.reserve(hypotheses.size());
 
   for (const Pose& hypothesis : hypotheses)
@@ -890,7 +890,7 @@ void Interface::publishPose(const Pose& robot, const rclcpp::Time& stamp)
 {
   geometry_msgs::msg::PoseWithCovarianceStamped message;
   message.header.stamp = stamp;
-  message.header.frame_id = global_frame_id_;
+  message.header.frame_id = fixed_frame_id_;
   message.pose.pose = retypePose(robot);
 
   std::array<double, 36> covariance{};
@@ -907,7 +907,7 @@ void Interface::publishTopHypotheses(const std::vector<ScoredPose>& survivors,
 {
   geometry_msgs::msg::PoseArray message;
   message.header.stamp = stamp;
-  message.header.frame_id = global_frame_id_;
+  message.header.frame_id = fixed_frame_id_;
   message.poses.reserve(survivors.size());
 
   for (const ScoredPose& survivor : survivors)
@@ -931,7 +931,7 @@ void Interface::publishTransform(const Pose& robot, const Pose& odom_in_robot,
 
   geometry_msgs::msg::TransformStamped message;
   message.header.stamp = stamp;
-  message.header.frame_id = global_frame_id_;
+  message.header.frame_id = fixed_frame_id_;
   message.child_frame_id = odom_frame_id_;
 
   message.transform.translation.x = odom_in_global.x;
@@ -1030,7 +1030,7 @@ std::expected<Pose, std::string> Interface::sensorOnRobot(
   const std::string& sensor_frame_id, const rclcpp::Time& stamp) const
 {
   const std::expected<Pose, std::string> placement =
-    placementOf(sensor_frame_id, robot_frame_id_, stamp);
+    placementOf(sensor_frame_id, base_frame_id_, stamp);
 
   if (placement.has_value())
     return placement;
@@ -1088,13 +1088,13 @@ std::string Interface::takeMap(const nav_msgs::msg::OccupancyGrid& map)
     localiser_ = localiser;
   }
 
-  if (map.header.frame_id != global_frame_id_)
+  if (map.header.frame_id != fixed_frame_id_)
   {
     RCLCPP_WARN(get_logger(),
       "This map is labelled \"%s\" and every answer from it will be labelled "
-      "\"%s\", which is what global_frame_id says. An answer's coordinates are "
+      "\"%s\", which is what fixed_frame_id says. An answer's coordinates are "
       "the map's own, so the two names have to mean the same frame.",
-      map.header.frame_id.c_str(), global_frame_id_.c_str());
+      map.header.frame_id.c_str(), fixed_frame_id_.c_str());
   }
 
   RCLCPP_INFO(get_logger(),

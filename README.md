@@ -208,11 +208,11 @@ Scans need nothing of the sort, the scan subscription being ordinary.
 | --- | --- | --- | --- |
 | in | `scan_topic` | `sensor_msgs/msg/LaserScan` | the measurement. The newest is held and nothing happens until the service is called |
 | in | `map_topic` | `nav_msgs/msg/OccupancyGrid` | the map to localise in. Subscribed transient local at depth one, so a map latched before the node started arrives on subscription. Empty subscribes nothing and the map is read from `map_file` instead |
-| out | `output_pose_topic` | `geometry_msgs/msg/PoseWithCovarianceStamped` | the answer, as a pose of the **robot**, in `global_frame_id`, stamped from the scan it was computed from |
+| out | `output_pose_topic` | `geometry_msgs/msg/PoseWithCovarianceStamped` | the answer, as a pose of the **robot**, in `fixed_frame_id`, stamped from the scan it was computed from |
 | out | `hypotheses_topic` | `geometry_msgs/msg/PoseArray` | optional. Every hypothesis the search started from |
 | out | `top_hypotheses_topic` | `geometry_msgs/msg/PoseArray` | optional. The survivors of the sift, in ranking order |
 | out | `map_scan_topic` | `sensor_msgs/msg/LaserScan` | optional. The scan the answer would see, cast from the map, for laying over the scan the sensor did see |
-| out | transform | `global_frame_id` <- `odom_frame_id` | only when `tf_broadcast` |
+| out | transform | `fixed_frame_id` <- `odom_frame_id` | only when `tf_broadcast` |
 
 One service, `global_localisation`, of type `std_srvs/srv/Trigger`.
 
@@ -249,13 +249,13 @@ Frame names carry no leading slash. tf2 rejects one, and one is refused at start
 
 | Parameter | Meaning | Default | Shipped |
 | --- | --- | --- | --- |
-| `global_frame_id` | the frame the map and the published answer are expressed in | `map` | `map` |
-| `robot_frame_id` | the robot's own frame, which the published pose places | `base_footprint` | `base_footprint` |
+| `fixed_frame_id` | the frame the map and the published answer are expressed in | `map` | `map` |
+| `base_frame_id` | the robot's own frame, which the published pose places | `base_footprint` | `base_footprint` |
 | `odom_frame_id` | the odometry frame, read only when broadcasting | `odom` | `odom` |
-| `tf_broadcast` | broadcast `global_frame_id` <- `odom_frame_id` for each answer | `false` | `true` |
+| `tf_broadcast` | broadcast `fixed_frame_id` <- `odom_frame_id` for each answer | `false` | `true` |
 | `tf_lookup_timeout` | seconds to wait for a transform before refusing a run | `0.1` | `0.1` |
 
-The sensor's own frame is **not** a parameter. It is read off the scan message, and the node works out where the sensor sits on the robot by looking `robot_frame_id` up against it. That transform must exist in the tree or every run is refused for want of it.
+The sensor's own frame is **not** a parameter. It is read off the scan message, and the node works out where the sensor sits on the robot by looking `base_frame_id` up against it. That transform must exist in the tree or every run is refused for want of it.
 
 `tf_broadcast` defaults to false because broadcasting into somebody else's transform tree is intrusive. The shipped file turns it on, which is what the ROS 1 package shipped.
 
@@ -394,9 +394,8 @@ The repairs to the tip were the split caster constructor, a conversion buffer si
 | --- | --- |
 | service `global_localization`, `std_srvs/Empty`, node relative under a configurable leaf | service `global_localisation`, `std_srvs/srv/Trigger`, node relative and fixed |
 | node `cbgl_node` in namespace `robot`, so the service answered at `/robot/cbgl_node/global_localization` | node `cbgl` in namespace `/`, so it answers at `/cbgl/global_localisation`. Both are launch arguments |
-| `fixed_frame_id` | `global_frame_id` |
-| `base_frame_id`, which named the frame the published pose places | `robot_frame_id`, same meaning and same `base_footprint` default. **Rename the setting rather than dropping it**, or a robot whose own frame is not `base_footprint` will have every answer placed for the wrong frame |
 | `configuration_files/params_cbgl.yaml`, `params_csm.yaml`, `params_fsm.yaml` | one `config/params.yaml`, keyed `/**:` |
+| `fixed_frame_id`, `base_frame_id`, `odom_frame_id` | the same three names, unchanged. They were renamed once during the port and renamed back, because a frame setting that quietly means something else is the kind of change that places every answer for the wrong frame on a robot whose own frame is not the default |
 | `launch/cbgl.launch` | `launch/cbgl.launch.xml` |
 
 **Gone**
@@ -405,7 +404,7 @@ The repairs to the tip were the split caster constructor, a conversion buffer si
 | --- | --- |
 | `do_icp`, `do_fsm` | one refinement path remains, the scan matcher, so there is nothing to choose. **The ROS 1 package shipped `do_icp: true`**, so anyone running its shipped configuration was refining by ICP, and that is the path that is gone. This is also why a sensor that does not see all the way round is no longer supported |
 | every setting of `params_csm.yaml` | the ICP library is gone with the path that used it |
-| `laser_z_orientation` | it existed to compensate for reading the grid's rows in reverse. The replacement map handles the origin's translation, its rotation and its row order itself |
+| `laser_z_orientation` | it existed to compensate for reading the grid's rows in reverse. The replacement map handles the origin's translation, its rotation and its row order itself. The ROS 1 build now handles a rotated origin too, so this setting is a leftover there rather than a difference in what the two can do |
 | the `vanilla` value of `map_scan_method` | it selected a second ray tracer that is gone. The three surviving names are `ray_marching`, `bresenham` and `cddt`, and any other name is refused at start-up. `vanilla` was also what ROS 1 fell back to when the setting was absent, so a configuration that never named one has to name one now |
 | `do_undersample_scan`, `undersample_rate` | `size_scan` does this, and does it by resampling rather than by dropping every nth ray |
 | `publish_pose_sets` | replaced by three optional topics, each off while its name is empty |
@@ -418,10 +417,10 @@ The repairs to the tip were the split caster constructor, a conversion buffer si
 * **The refinement matches against the map.** The ROS 1 version's scan matching path matched each survivor against one scan manufactured at that survivor's own pose. This one casts into the map at every pose it tries. This is the largest behavioural difference in the port and the one most likely to move the accuracy figures.
 * **`tf_broadcast: false` works.** In the ROS 1 version, turning broadcasting off meant the sensor's placement on the robot was never looked up, and every cast composed the robot pose with an uninitialised transform, so the published pose was arbitrary. Here the placement is read on every run whether broadcasting is on or off, which is why the node's own default for `tf_broadcast` can be false.
 * **A rotated cast is labelled with the orientation the rotation actually amounts to.** The ROS 1 version shifted the range vector by one number of samples and labelled the result with a different angle, drifting to nearly eight degrees by the last candidate and in the opposite direction, so the refinement started from a pose that disagreed with the scan it was chosen for.
-* **Hypotheses are drawn on free cells.** The ROS 1 version computed sampling bounds that swapped the map's centre for its half extent. For a map message origin at zero, which is where a map server usually puts it, the two arithmetics agree and the defect is latent. For an origin away from zero they diverge, and for a map centred on the world origin, which is what a mapping run started at the origin produces, the interval collapses to a single point the rejection loop spins on without returning. Dispersal by free cell removes the arithmetic entirely.
+* **Hypotheses are drawn on free cells.** This version disperses by free cell through the map's own accessor and computes no sampling interval at all. The ROS 1 version computed one, and computed it with the map's centre and its half extent the wrong way round, which was latent on a map at the world origin and left the rejection loop spinning on a map centred there. **That is repaired on `kinetic-devel` and this is no longer a difference between the two builds**, only a difference in how each arrives at the same place. It is recorded because a reader comparing against a ROS 1 state older than the repair will meet it.
 * **The poses drawn are sensor poses.** The ROS 1 version dispersed robot poses over free cells and offset to the sensor afterwards, which can place the sensor, which is what casts, on a blocked cell.
 * **No pose is published when a run fails.** The ROS 1 version published one regardless, reading its winner from index minus one. It never refused a candidate, scoring every one unconditionally; the index stayed at minus one when the survivor list was empty, which `top_k_caers` at zero produces.
-* **The published pose is stamped from the scan** that produced it, not from the wall clock, and its frame is `global_frame_id` rather than the hardcoded string `/map`.
+* **The published pose is stamped from the scan** that produced it, not from the wall clock, and its frame is `fixed_frame_id` rather than the hardcoded string `/map`.
 * **A parameter outside its range refuses to start.** The node says which setting and which value, and exits with 1.
 
 ## Licensing

@@ -159,9 +159,9 @@ std::set<std::string> everyNameRclcppDeclares()
 std::vector<Setting> everySetting()
 {
   return {
-    Setting{.name = "global_frame_id",
+    Setting{.name = "fixed_frame_id",
       .value = rclcpp::ParameterValue(std::string("map"))},
-    Setting{.name = "robot_frame_id",
+    Setting{.name = "base_frame_id",
       .value = rclcpp::ParameterValue(std::string("base_footprint"))},
     Setting{.name = "odom_frame_id",
       .value = rclcpp::ParameterValue(std::string("odom"))},

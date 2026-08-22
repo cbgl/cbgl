@@ -56,7 +56,7 @@
     map_file: ""
 
     # Where the answer is published, as a pose of the robot rather than of the
-    # sensor, in global_frame_id, stamped from the scan it was computed from.
+    # sensor, in fixed_frame_id, stamped from the scan it was computed from.
     # The default is where amcl reads a pose to be seeded with.
     output_pose_topic: "/initialpose"
 
@@ -84,7 +84,7 @@
     # --------------------------------------------------------------------------
     # The frame the map and the published answer are expressed in. Frame names
     # carry no leading slash; tf2 rejects one.
-    global_frame_id: "map"
+    fixed_frame_id: "map"
 
     # The robot's own frame, which is what the published pose places. The node
     # works out where the sensor sits on the robot by looking up this frame
@@ -92,12 +92,12 @@
     # run is refused for want of it. The sensor's frame is read off the scan
     # message rather than named here, so that nothing has to be told twice what
     # the scan already says.
-    robot_frame_id: "base_footprint"
+    base_frame_id: "base_footprint"
 
     # The odometry frame, read only when broadcasting.
     odom_frame_id: "odom"
 
-    # Broadcast global_frame_id <- odom_frame_id for each answer, which is what
+    # Broadcast fixed_frame_id <- odom_frame_id for each answer, which is what
     # places the answer in a tree that already carries an odometry frame. It is
     # the robot's pose in the global frame composed with the odometry frame's
     # pose in the robot frame, and the second half is read from the tree at the

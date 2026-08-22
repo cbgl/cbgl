@@ -46,7 +46,7 @@ A scan whose first ray does not sit half a turn behind the sensor's heading, or 
 
 ### The map's own frame is warned about rather than checked
 
-The answer's coordinates are in whatever frame the grid's origin is expressed in, and its label is `global_frame_id`. Nothing ties the two together, so publishing a map in one frame and configuring another gives an answer that is numerically right and labelled wrong. The node logs a warning naming both frames and does not refuse, because a mismatch is a configuration smell rather than an impossibility, and because refusing would break a working setup that happens to name its frames differently. `fsm_localisation` ignores the map's frame too.
+The answer's coordinates are in whatever frame the grid's origin is expressed in, and its label is `fixed_frame_id`. Nothing ties the two together, so publishing a map in one frame and configuring another gives an answer that is numerically right and labelled wrong. The node logs a warning naming both frames and does not refuse, because a mismatch is a configuration smell rather than an impossibility, and because refusing would break a working setup that happens to name its frames differently. `fsm_localisation` ignores the map's frame too.
 
 ### The published covariance is a seed and not an estimate
 

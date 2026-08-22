@@ -119,7 +119,7 @@ private:
 
   /**
    * @brief Where the sensor sits on the robot, read from the transform tree.
-   * @details Looked up as `robot_frame_id` against the frame the scan message
+   * @details Looked up as `base_frame_id` against the frame the scan message
    * itself names, at the stamp that message carries. Nothing has to be told
    * twice what the scan already says.
    * @return the placement, or a sentence saying the tree does not carry it.
@@ -162,10 +162,10 @@ private:
   fsm_localisation::CastingMethod casting_method_{
     fsm_localisation::CastingMethod::ray_marching};
 
-  std::string global_frame_id_;
+  std::string fixed_frame_id_;
   std::string map_topic_;
   std::string odom_frame_id_;
-  std::string robot_frame_id_;
+  std::string base_frame_id_;
   std::string scan_topic_;
 
   double initial_cov_aa_{0.06854};
