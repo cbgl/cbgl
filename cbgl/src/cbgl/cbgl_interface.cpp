@@ -419,13 +419,16 @@ Interface::Interface(const rclcpp::NodeOptions& options)
   const std::string refinement =
     get_parameter("refinement_method").as_string();
 
-  if (refinement != "fsm" && refinement != "icp")
+  if (refinement != "fsm" && refinement != "icp" && refinement != "none")
   {
     const std::string problem = std::format(
-      "refinement_method must be \"fsm\" or \"icp\", got \"{}\"", refinement);
+      "refinement_method must be \"fsm\", \"icp\" or \"none\", got \"{}\"",
+      refinement);
     RCLCPP_FATAL(get_logger(), "Refusing to start: %s", problem.c_str());
     throw std::invalid_argument(problem);
   }
+
+  parameters_.refine = refinement != "none";
 
   if (refinement == "icp")
   {
@@ -642,9 +645,11 @@ Interface::Interface(const rclcpp::NodeOptions& options)
     rclcpp::ServicesQoS(), service_group_);
 
   RCLCPP_INFO(get_logger(), "Refining by %s",
-    parameters_.icp.has_value()
-      ? "the point to line solver, csm"
-      : "the panoramic scan matcher, fsm_localisation");
+    !parameters_.refine
+      ? "nothing: the sift's own best candidate is published as it stands"
+      : parameters_.icp.has_value()
+        ? "the point to line solver, csm"
+        : "the panoramic scan matcher, fsm_localisation");
 
   RCLCPP_INFO(get_logger(),
     "Standing by. To localise issue ros2 service call "

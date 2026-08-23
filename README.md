@@ -320,11 +320,20 @@ Every survivor of the sift is refined against the map. Two algorithms can do it 
 
 | Parameter | Meaning | Default | Shipped |
 | --- | --- | --- | --- |
-| `refinement_method` | which algorithm refines a survivor: `fsm` or `icp` | `fsm` | `fsm` |
+| `refinement_method` | which algorithm refines a survivor: `fsm`, `icp` or `none` | `fsm` | `fsm` |
 
 `fsm` is the panoramic scan matcher of `fsm_localisation`, which reads the map afresh at every pose it tries. `icp` is Andrea Censi's canonical scan matcher, point to line, which reads the map **once**, at the survivor's own pose, and then matches the measurement onto that one frozen reading. That difference is the whole of what separates them: one consults the map throughout, the other consults it once.
 
-The ROS 1 package offered both and shipped with `icp` selected. This ships with `fsm`, so a configuration that says nothing gets what this package has always done. Any other value is refused at start-up, naming the setting and the value.
+`none` refines nothing and publishes the sift's own best candidate as it stands. Nothing casts a second time, so it is by far the cheapest configuration and by far the least accurate: the answer is quantised to what the sift can express, one of `da` orientations at the position of a drawn free cell. Measured on the real map at two hundred trials:
+
+| Refinement | Within 5 cm | Within 50 cm | Median | Heading | Time |
+| --- | --- | --- | --- | --- | --- |
+| `fsm` | 100% | 100% | 0.9 mm | 0.02 deg | 167 ms |
+| `none` | 7% | 94.5% | 150 mm | 1.71 deg | 96 ms |
+
+So `none` puts the robot in the right part of the building and no more. It is what a caller wants who refines elsewhere, or who needs a room rather than a pose. Giving solver settings alongside it is refused rather than one of the two quietly winning.
+
+The ROS 1 package offered both refinements and shipped with `icp` selected. This ships with `fsm`, so a configuration that says nothing gets what this package has always done. Any other value is refused at start-up, naming the setting and the value.
 
 `icp` needs `csm`, which is not installed by a package name and is LGPL v3. See [Installation](#from-source) for building it and [Licensing](#licensing) for what depending on it means.
 

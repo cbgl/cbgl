@@ -102,6 +102,18 @@ struct Parameters
 
   std::optional<IcpParameters> icp;
 
+  /**
+   * @brief Whether a survivor is refined at all.
+   * @details False publishes the sift's own best candidate as it stands. That
+   * answer is quantised to what the sift can express: one of `da` orientations,
+   * 11.25 degrees apart at the shipped 32, at the position of a drawn free
+   * cell. It is the cheapest configuration and the least accurate, and it is
+   * what a caller wants who refines elsewhere or only needs a room.
+   * @remark `icp` is ignored where this is false, and a settings set carrying
+   * both is refused rather than silently preferring one.
+   */
+  bool refine{true};
+
   fsm_localisation::Parameters matcher;
 
   unsigned int num_threads{0};

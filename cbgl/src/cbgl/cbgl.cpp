@@ -175,6 +175,37 @@ std::size_t prefixOf(const std::size_t panoramic, const std::size_t rays)
 }
 
 /**
+ * @brief The sift's own best candidate, returned without refining anything.
+ * @details `scored` is already sorted by the same metric the selection would
+ * rank a refined pose by, so the cheapest of them is the winner and no cast is
+ * taken to find that out. A candidate that met nothing scores infinity and is
+ * refused here as it would be after a refinement.
+ * @remark The two refusal maps are empty because nothing was asked to refine.
+ * A caller reading them cannot tell that from a run where every refinement
+ * succeeded, which is why the node says at start up which refinement it holds.
+ */
+std::expected<Result, Error> unrefinedResult(std::vector<ScoredPose> scored,
+  const std::size_t num_candidates,
+  const std::chrono::steady_clock::time_point started)
+{
+  if (std::isinf(scored.front().score))
+    return std::unexpected(Error{
+      .reason = Error::Reason::no_scorable_pose,
+      .icp_refusals = {}, .refusals = {}});
+
+  const Pose winner = scored.front().pose;
+
+  return Result{
+    .pose = winner,
+    .execution_time = std::chrono::duration<double>(
+      std::chrono::steady_clock::now() - started).count(),
+    .num_candidates = num_candidates,
+    .survivors = std::move(scored),
+    .icp_refusals = {},
+    .refusals = {}};
+}
+
+/**
  * @brief The scan every stage of a run works from: exactly `size_scan` rays,
  * or the whole of `ranges` where `size_scan` is zero.
  * @details Deciding a scan too short or entirely invalid here, before a single
@@ -378,6 +409,10 @@ std::vector<Candidate> candidatesOf(const Pose& pose,
 
 std::string validate(const Parameters& parameters)
 {
+  if (!parameters.refine && parameters.icp.has_value())
+    return "refine is false and a solver settings set is given, which asks for "
+      "no refinement and for one at the same time";
+
   if (parameters.da == 0U)
     return std::format("da must be greater than zero, got {}", parameters.da);
 
@@ -495,6 +530,9 @@ std::expected<Result, Error> Localiser::localise(std::span<const double> ranges,
   std::ranges::nth_element(scored, scored.begin() + kept, {}, &ScoredPose::score);
   scored.resize(kept);
   std::ranges::sort(scored, {}, &ScoredPose::score);
+
+  if (!parameters_.refine)
+    return unrefinedResult(scored, num_candidates, started);
 
   const Refinement refinement = icp_refiner_.has_value()
     ? correctedPosesOf(

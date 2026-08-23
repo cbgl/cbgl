@@ -164,6 +164,42 @@ TEST(Validate, AnUnknownMapScanMethodIsJudgedInTheMatchersOwnWords)
     << "validators disagree the moment one of them is changed.";
 }
 
+/**
+ * @brief Asking for no refinement and for a solver at once is refused.
+ * @details The node cannot produce this state, since it declares the solver's
+ * settings only where the solver is chosen. A caller of the library can, by
+ * filling both fields of the struct, and the two say opposite things: one asks
+ * for the sift's own answer and the other supplies a solver to improve it
+ * with. Preferring either quietly would make the other setting a lie, so it is
+ * refused instead.
+ */
+TEST(Validate, NoRefinementAndASolverTogetherAreRefused)
+{
+  Parameters parameters;
+  parameters.refine = false;
+  parameters.icp = cbgl::IcpParameters{};
+
+  const std::string problem = validate(parameters);
+
+  EXPECT_FALSE(problem.empty())
+    << "a settings set asking for no refinement while supplying a solver was "
+    << "accepted. One of the two would then have been ignored, and nothing "
+    << "would say which.";
+
+  EXPECT_NE(problem.find("refine"), std::string::npos)
+    << "the refusal reads \"" << problem << "\" and does not name the setting "
+    << "that contradicts the other.";
+}
+
+TEST(Validate, NoRefinementOnItsOwnIsUsable)
+{
+  Parameters parameters;
+  parameters.refine = false;
+
+  EXPECT_EQ(validate(parameters), "")
+    << "asking for no refinement, and for nothing else, was refused.";
+}
+
 TEST(Validate, TheDefaultParametersAreUsable)
 {
   EXPECT_EQ(cbgl::validate(Parameters{}), "")
