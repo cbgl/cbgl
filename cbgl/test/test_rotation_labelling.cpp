@@ -456,11 +456,6 @@ TEST_P(RotationLabelling, ANarrowerApertureKeepsTheMiddleAndTheSameLabels)
 
   const std::vector<Candidate> panoramic = cbgl::candidatesOf(pose, cast, da);
 
-  /* Three quarters of a turn, which is the aperture the two builds are
-   * compared at, and two apertures either side of it so that a fault in the
-   * window's arithmetic cannot hide behind one convenient number. 271 is odd
-   * against an even ray count, which is the case where the halfway rounding
-   * decides the answer. */
   for (const unsigned int kept : {270U, 271U, 359U})
   {
     const std::vector<Candidate> narrow =

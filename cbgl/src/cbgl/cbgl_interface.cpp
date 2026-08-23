@@ -88,10 +88,6 @@ std::string anglesProblemOf(const sensor_msgs::msg::LaserScan& scan)
       "would be read twice", scan.ranges.size(), increment, aperture);
   }
 
-  // Half the aperture, not half of one ray fewer. A panoramic scan of n rays
-  // begins at exactly -pi under this convention, which is what every recording
-  // this package is driven from carries and what its own sift assumes when it
-  // reads a cast's first ray as sitting half a turn behind the heading.
   const double expected_min = -0.5 * aperture;
 
   if (std::abs(FSM::Utils::wrapAngle(scan.angle_min - expected_min)) > slack)
@@ -885,10 +881,6 @@ void Interface::localiseOnce(std_srvs::srv::Trigger::Response& outcome)
   const std::vector<double> ranges(scan->ranges.begin(), scan->ranges.end());
   const std::vector<Pose> hypotheses = localiser->disperse();
 
-  /* How much of a turn the scan covers, taken from the scan itself rather than
-   * assumed. `anglesProblemOf` has already refused anything this cannot be
-   * read off honestly: a spacing that is not one, a span wider than a turn, or
-   * a first ray that does not sit half the span behind the heading. */
   const double aperture =
     static_cast<double>(scan->ranges.size()) * scan->angle_increment;
 
@@ -933,16 +925,6 @@ void Interface::localiseOnce(std_srvs::srv::Trigger::Response& outcome)
   for (const auto& [reason, count] : result->icp_refusals)
     refused += count;
 
-  /**
-   * @remark The word "matcher" here names the panoramic scan matcher and is
-   * wrong whenever the point to line solver did the work. It stays because it
-   * is not only a sentence: the harness that measures this package reads these
-   * counts out of this reply by matching this wording, so changing it here
-   * alone loses three columns of every recorded trial silently, which is worse
-   * than a word being wrong. Change it there and here together or not at all.
-   * The refusal sentence carries no such reader and does say which refined.
-   * Which one ran is reported once at start up, so a log attributes a run.
-   */
   outcome.success = true;
   outcome.message = std::format(
     "localised in {:.0f} ms: {} candidates scored, {} survivors handed to the "
@@ -1303,15 +1285,6 @@ std::string Interface::takeMap(const nav_msgs::msg::OccupancyGrid& map)
   FreeSpace free_space = freeSpaceOf(**built);
   const std::size_t free_cells = free_space.cells.size();
 
-  /* A map with nowhere to stand is refused here rather than at the first
-   * request. The builder judges the message's shape and says nothing about
-   * what is in it, so a grid whose every cell is blocked passes it and the
-   * node comes up looking healthy, only to refuse every request afterwards
-   * for a reason that names neither the map nor where it came from. Refusing
-   * it at the point the map arrives means a start up from a file dies of it
-   * with the file named, which is what this package's own documentation
-   * promises, and a map on a topic is dropped with the same sentence while
-   * whatever map the node already held it keeps. */
   if (free_cells == 0U)
   {
     return "the map carries no free cell, so there is nowhere in it to place "

@@ -241,21 +241,17 @@ double caer(std::span<const double> measured, std::span<const double> cast,
  * @brief The `da` candidates one panoramic cast from `pose` yields.
  * @details A cast over a full turn taken at one orientation is a cast at any
  * other orientation of the same position, read from a different starting
- * sample. Candidate `k` is therefore the cast rotated by `round(k * n / da)`
- * samples, where `n` is the ray count, and it is labelled with the orientation
- * that rotation actually amounts to rather than with the one `k` alone would
- * suggest. The two differ, by up to half of a candidate's spacing, wherever
- * `da` does not divide `n`.
+ * sample. Candidate `k` is the cast rotated by `round(k * n / da)` samples,
+ * and is labelled with the orientation that rotation actually amounts to
+ * rather than the one `k` alone would suggest. The two differ wherever `da`
+ * does not divide `n`.
+ * @param rays how many of the rotated cast a candidate keeps, counted from the
+ * middle. Zero keeps the whole of it, which is what a sensor seeing all the
+ * way round wants. A narrower sensor casts the whole turn at its own angular
+ * resolution and keeps the middle window; the rotation is still over a full
+ * turn, so the orientation a candidate carries is unaffected.
  * @remark This is the whole of the saving the algorithm rests on: `da`
  * orientations of a position cost one cast between them.
- * @param rays how many of the rotated cast a candidate keeps, counted from the
- * middle of it. Zero keeps the whole of it, which is what a sensor that sees
- * all the way round wants and is the only thing this had before a narrower one
- * was supported. A sensor that sees less is served by casting the whole turn at
- * its own angular resolution, which is more rays than the sensor has, and
- * keeping the middle window: the rotation is still over a full turn, so the
- * orientation a candidate is labelled with is unaffected, and only which part
- * of the turn is compared changes.
  */
 std::vector<Candidate> candidatesOf(const Pose& pose,
   std::span<const double> cast, unsigned int da, std::size_t rays = 0);
@@ -269,33 +265,20 @@ std::vector<Candidate> candidatesOf(const Pose& pose,
 std::string validate(const Parameters& parameters);
 
 /**
- * @brief One-shot global localisation of a panoramic 2D lidar in an occupancy
- * grid.
- * @details
- * Where the matcher corrects an estimate that is already roughly right, this
- * needs no estimate at all. It disperses hypothesis poses over the map's free
- * space, casts one panoramic scan per hypothesis position and scores every
- * orientation that cast yields against the measurement, refines the cheapest
- * few by handing them to the matcher, and returns whichever of the refined
- * poses the same score likes best.
- * Nothing survives a call. Two localisations in either order give the same two
- * answers, and a localisation is repeatable exactly by pinning `rng_seed`.
- * The map is borrowed through `FSM::GridReference`, which is what keeps this
- * file and its implementation free of any ROS header: a host reads an occupancy
- * grid message into something that stands behind that interface and hands it
- * over. The shared pointer is held for the life of the localiser, so a host
- * replacing the map constructs a second localiser rather than editing this
- * one's.
- * The accuracy an answer can reach is bounded by the map and not by the
- * algorithm. A ray stops at a cell, so a map of five centimetre cells cannot
- * support an answer better than five centimetres however good the search is.
- * One of two refinements is built at construction and it is the settings that
- * say which: the matcher, which is what this package has always refined with,
- * or the iterative closest point refinement, which is held beside it and
- * constructed only where it is asked for. Nothing stands over the two of them.
- * A run branches once, before it walks the survivors, and a run that refines
- * with the matcher costs no more at run time than it did before the other one
- * existed.
+ * @brief One-shot global localisation of a 2D lidar in an occupancy grid.
+ * @details Where the matcher corrects an estimate that is already roughly
+ * right, this needs no estimate. It disperses hypotheses over the map's free
+ * space, casts one scan per position, scores every orientation that cast
+ * yields against the measurement, refines the cheapest few, and returns
+ * whichever refined pose the same score likes best.
+ * Nothing survives a call, and a run repeats exactly by pinning `rng_seed`.
+ * The map is borrowed through `FSM::GridReference`, which keeps this free of
+ * any ROS header, and is held for the life of the localiser.
+ * The accuracy is bounded by the map: a ray stops at a cell, so a five
+ * centimetre grid cannot support a better answer than five centimetres.
+ * One of two refinements is built at construction, the settings saying which.
+ * A run branches once, before it walks the survivors, so refining with the
+ * matcher costs no more than before the other existed.
  */
 class Localiser
 {
@@ -333,17 +316,11 @@ public:
    * @param range_max the scan's own maximum range, which is what a ray meeting
    * nothing reports. The map has never seen either bound, so both are given
    * per localisation rather than held.
-   * @param aperture how much of a turn the scan covers, in radians. A sensor
-   * that sees all the way round is the default and is what this package has
-   * always localised. A narrower one is served by casting the whole turn at the
-   * sensor's own angular resolution, which is more rays than the sensor
-   * carries, and comparing only the middle window of that cast. The rotation
-   * that yields a candidate is still over the whole turn, so what a candidate
-   * is labelled with does not change; only how much of the turn is compared
-   * does.
-   * @remark A narrower sensor is supported here and is not supported by the
-   * node above, which still refuses one. Restoring that is a separate piece of
-   * work and this is the half of it that belongs to the algorithm.
+   * @param aperture how much of a turn the scan covers, in radians. A whole
+   * turn is the default. A narrower sensor is served by casting the whole turn
+   * at the sensor's own angular resolution and comparing only the middle
+   * window of that cast. The rotation that yields a candidate is still over
+   * the whole turn, so what a candidate is labelled with does not change.
    * @remark Handing the set in rather than drawing it is what lets a test start
    * from a hypothesis set whose answer is known, and what lets two builds be
    * compared on everything downstream of the draw.

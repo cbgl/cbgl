@@ -358,15 +358,6 @@ std::expected<Image, std::string> pgmOf(const std::vector<unsigned char>& bytes,
   const std::size_t pixels = static_cast<std::size_t>(*width) * *height;
   const std::size_t bytes_a_sample = *largest > kLargestOneByteSample ? 2U : 1U;
 
-  /* Nothing is sized from the header until the header has been measured
-   * against the bytes actually in hand. A picture states its own dimensions
-   * and nothing in it obliges them to describe what follows, so reserving
-   * from them first turns a mistyped digit into an allocation of every byte
-   * the machine has, and a product that wraps turns it into an index that
-   * walks outside the buffer. Both are ruled out here rather than caught
-   * afterwards, and this must stay above the reserve below. A binary sample
-   * takes at least one byte on disk and a text one at least two counting its
-   * separator, so either way there is a floor to check against. */
   const std::size_t after_header = bytes.size() - at;
   const std::size_t floor_a_sample = binary ? bytes_a_sample : 2U;
 
@@ -383,13 +374,6 @@ std::expected<Image, std::string> pgmOf(const std::vector<unsigned char>& bytes,
 
   if (binary)
   {
-    /* One whitespace byte is what the format calls for. A picture carrying
-     * two, which is what a CRLF separator gives and what any pass through a
-     * Windows editor produces, would otherwise hand that second byte over as
-     * the first sample, shift every pixel by one and drop the last, with the
-     * check below still satisfied because the file holds one byte more than
-     * it needs. That is a map wrong everywhere and silent, so the separator is
-     * consumed exactly rather than approximately. */
     if (at < bytes.size() && bytes[at] == '\r' && at + 1U < bytes.size()
       && bytes[at + 1U] == '\n')
       at += 2U;
@@ -459,11 +443,6 @@ std::expected<Image, std::string> pgmOf(const std::vector<unsigned char>& bytes,
  */
 std::expected<Image, std::string> readImage(const std::filesystem::path& path)
 {
-  /* What the path names is established before it is opened. A path naming a
-   * character device reads until the memory runs out; one naming a pipe blocks
-   * here for ever, and a node that never finishes starting and never says why
-   * is the worst outcome on offer. Both are ruled out by insisting on an
-   * ordinary file of a sane size. */
   std::error_code code;
   const std::filesystem::file_status status =
     std::filesystem::status(path, code);
@@ -588,10 +567,6 @@ std::expected<nav_msgs::msg::OccupancyGrid, std::string> mapFromFile(
       "describes no map", path));
   }
 
-  /* The map server reads `mode` as trinary, scale or raw, and the three give
-   * three different maps from one picture. This reads trinary. A description
-   * asking for either of the others is refused rather than quietly handed the
-   * one it did not ask for. */
   if (description["mode"])
   {
     const std::expected<std::string, std::string> mode =
@@ -651,14 +626,6 @@ std::expected<nav_msgs::msg::OccupancyGrid, std::string> mapFromFile(
   if (!free_threshold.has_value())
     return std::unexpected(free_threshold.error());
 
-  /* These two decide what every cell of the map means, and until now they were
-   * the only numbers in the description taken as they came. A threshold above
-   * one leaves nothing blocked, so every wall becomes free and no cast meets
-   * anything; one below nought makes every cell a wall; a free threshold above
-   * the occupied one means no cell is ever unknown; and either as a NaN makes
-   * every comparison false, so the whole map is unknown and the node refuses
-   * every request afterwards for a reason that names neither the file nor the
-   * key. All of them are silent, so all of them are refused here. */
   for (const auto& [name, value] : {
     std::pair<const char*, double>{"occupied_thresh", *occupied_threshold},
     std::pair<const char*, double>{"free_thresh", *free_threshold}})

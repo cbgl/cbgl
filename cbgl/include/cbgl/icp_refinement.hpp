@@ -42,29 +42,12 @@ using Pose = FSM::Pose;
 /**
  * @brief Everything the iterative closest point solver needs, and nothing
  * about ROS.
- * @details
- * Every setting the ROS 1 build reads for this solver and that this solver
- * still carries is here, under the name that build reads it by and with the
- * value that build falls back to when it is not given one. The settings file
- * that build ships overrides most of them; the defaults below are the code's
- * own, so that a host that says nothing gets what the ROS 1 code gets when it
- * is told nothing.
- * A setting the solver takes as nought or one is a `bool` here rather than an
- * `int`, since that is what it means and what a host would declare it as. The
- * two spellings with a capital in them keep it, the name being the point.
- * @remark The number of rays a match runs at is not here. It is the length of
- * the scan handed to `IcpRefiner::refine`, which takes the cast to that same
- * length and refuses a cast that comes back at any other, so the two scans
- * cannot disagree about it.
- * @remark `orientation_neighbourhood` is bounded above as well as below. The
- * solver turns it into an allocation of twice its size, once for every ray of
- * every scan, and an allocation it cannot satisfy throws out through a stack
- * the solver does not unwind, leaving one level of its own context stack held
- * for the rest of the process.
- * @remark `use_sigma_weights` is refused where it is on. It weights each
- * correspondence by a per reading deviation that nothing here fills, so it
- * cannot do what its name says and the solver complains once per
- * correspondence instead of weighting anything.
+ * @details Every setting the ROS 1 build reads for this solver and that this
+ * solver still carries, under that build's own name and with its own code
+ * fallback, so a host that says nothing gets what that code gets when told
+ * nothing. A setting the solver takes as nought or one is a `bool` here.
+ * @remark The ray count is not here. It is the length of the scan handed to
+ * `IcpRefiner::refine`, and the cast is taken to the same length.
  */
 struct IcpParameters
 {
@@ -184,41 +167,24 @@ std::string validate(const IcpParameters& parameters);
 /**
  * @brief Refinement of a pose estimate against a map, by iterative closest
  * point between the measured scan and one cast taken where the estimate says.
- * @details
- * One cast, taken once, at the estimate. The solver then walks the measured
- * scan onto that one frozen cast and reports how far it had to move it. This
- * is the whole of the difference between this and
- * `fsm_localisation::Corrector`, which casts afresh at every pose it tries:
- * there the map is consulted throughout, here it is consulted once and the
- * rest of the work is between two scans. A refinement that cast again per
- * iteration would be a different algorithm wearing this one's name.
- * Nothing this library holds survives a refinement, and two refinements in
- * either order give the same two answers. The solver underneath is another
- * matter: it keeps a context stack, the counters that go with it and every
- * matrix it has ever allocated in process globals, and reuses them from one
- * call to the next. None of that shows in the answers, which is why the two
- * sentences above still stand, and all of it is why the first remark below
- * is not optional.
- * The map is borrowed through `FSM::GridReference`, which is what keeps this
- * file and its implementation free of any ROS header: a host reads an
- * occupancy grid message into something that stands behind that interface and
- * hands it over. The shared pointer is held for the life of the refiner, so a
- * host replacing the map constructs a second refiner rather than editing this
- * one's.
- * The accuracy an answer can reach is bounded by the map and not by the
- * solver. A ray stops at a cell, so a map of five centimetre cells cannot
- * support an answer better than five centimetres however good the match is.
- * @remark `refine` must not be called concurrently, on this refiner or on any
- * other one in the same process. The state the solver keeps is process wide
- * rather than per instance and nothing guards it, so two calls running at once
- * can be handed each other's matrices. Refine candidates one at a time.
- * @remark The solver this is linked against must carry the correction to its
- * neighbour gathering bounds. Without it the downward walk takes one step more
- * than its buffer holds, and at a neighbourhood of twenty, which is the value
- * shipped, that is a forty first entry written into a buffer of forty. The
- * path is entered whenever `do_alpha_test` is on, which is how the ROS 1
- * settings ship it, so it is the ordinary configuration that overruns rather
- * than an unusual corner of it.
+ * @details One cast, taken once, at the estimate. The solver then walks the
+ * measured scan onto that frozen cast. `fsm_localisation::Corrector` casts
+ * afresh at every pose it tries; this consults the map once and the rest of
+ * the work is between two scans.
+ * The map is borrowed through `FSM::GridReference`, which keeps this free of
+ * any ROS header, and is held for the life of the refiner, so replacing it
+ * means a second refiner.
+ * The accuracy is bounded by the map: a ray stops at a cell, so a five
+ * centimetre grid cannot support a better answer than five centimetres.
+ * @remark `refine` must not be called concurrently, on this refiner or any
+ * other in the process. The solver keeps its context stack, its counters and
+ * every matrix it has allocated in process globals and guards none of it, so
+ * two calls at once can be handed each other's matrices.
+ * @remark The solver linked against must carry the correction to its neighbour
+ * gathering bounds. Without it the downward walk takes one step more than its
+ * buffer holds, which at the shipped neighbourhood of twenty writes a forty
+ * first entry into a buffer of forty. The path is entered whenever
+ * `do_alpha_test` is on, which is how the ROS 1 settings ship it.
  */
 class IcpRefiner
 {
@@ -227,9 +193,7 @@ public:
    * @brief Construct a refiner over a settings set and the map to refine
    * against.
    * @remark `map` must not be null. Every refinement dereferences it and
-   * nothing checks it, a map being something a host settles once at
-   * construction rather than something a single refinement could refuse and be
-   * asked again about.
+   * nothing checks it.
    */
   IcpRefiner(const IcpParameters& parameters,
     std::shared_ptr<const FSM::GridReference> map);
@@ -242,9 +206,9 @@ public:
   /**
    * @brief Refine one pose estimate against the map.
    * @param ranges the measured scan, already reduced to the number of rays the
-   * match is to run at. The cast is taken to that same number, so ray `i` of
-   * either scan sits at `-pi + i * 2 * pi / n` in the sensor's own frame and
-   * the two share one angle array by construction.
+   * match is to run at. Ray `i` of either scan sits at
+   * `-aperture / 2 + i * aperture / n` in the sensor's own frame, so the two
+   * share one angle array by construction.
    * @param estimate where the sensor is thought to have been when that scan
    * was taken, in the frame the map is given in.
    * @param range_min the scan's own minimum range. A reading under it is
@@ -252,26 +216,19 @@ public:
    * @param range_max the scan's own maximum range, which is what a ray meeting
    * nothing reports. The map has never seen either bound, so both are given
    * per refinement rather than held.
-   * @param aperture how much of a turn the scan covers, in radians. A sensor
-   * that sees all the way round is the default. A narrower one is served by
-   * casting the whole turn at the sensor's own angular resolution, which is
-   * more rays than the sensor carries, and matching against the middle window
-   * of that cast. The cast is still taken once and still at the estimate; only
-   * how much of it is used changes. A `range_max` of a hundred metres or more
-   * is accepted, but no reading at or above a hundred is carried into the match
-   * as a distance, because the solver refuses outright any scan that offers it
-   * one. A lidar whose far bound is that high marks its own far bound usable,
-   * and every refinement of it would otherwise be refused with nothing to read
-   * a cause out of. Such a reading is marked unusable, exactly as a reading
-   * past the far bound already is, and the rest of the scan is matched as it
-   * stands.
-   * @remark The solver writes to standard error on its own account whenever it
-   * refuses, in terminal colour where the terminal looks capable of it, and
-   * carries no setting that silences it. A host refining many candidates should
-   * expect output on its error stream that its own logger never passed through.
+   * @param aperture how much of a turn the scan covers, in radians. A whole
+   * turn is the default. A narrower sensor is served by casting the whole turn
+   * at the sensor's own angular resolution and matching against the middle
+   * window of that cast; the cast is still taken once, at the estimate.
+   * @remark A reading at or above a hundred metres is marked unusable rather
+   * than carried in as a distance. The solver refuses outright any scan that
+   * offers it one, so a lidar whose far bound is that high would otherwise
+   * have every refinement refused with nothing to read a cause from.
+   * @remark The solver writes to standard error whenever it refuses, in colour
+   * where the terminal allows, and carries no setting that silences it.
    * @remark The pose is a **sensor** pose, in and out. The ROS 1 build refines
-   * a robot pose and so wraps the solver's answer between the sensor to base
-   * transforms before applying it. There is nothing to wrap it between here.
+   * a robot pose and so wraps the answer between the sensor to base
+   * transforms; there is nothing to wrap it between here.
    */
   std::expected<IcpResult, IcpError> refine(std::span<const double> ranges,
     const Pose& estimate, double range_min, double range_max,
