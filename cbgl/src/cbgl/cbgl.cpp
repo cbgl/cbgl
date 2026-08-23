@@ -183,6 +183,10 @@ std::size_t prefixOf(const std::size_t panoramic, const std::size_t rays)
  * @remark The two refusal maps are empty because nothing was asked to refine.
  * A caller reading them cannot tell that from a run where every refinement
  * succeeded, which is why the node says at start up which refinement it holds.
+ * @remark `scored` must not be empty. `validate` refuses a `top_k_caers` of
+ * nought, which is what guarantees it, and a caller reaching `Localiser`
+ * without passing through that refusal has undefined behaviour here where the
+ * refined paths would report every survivor refused.
  */
 std::expected<Result, Error> unrefinedResult(std::vector<ScoredPose> scored,
   const std::size_t num_candidates,

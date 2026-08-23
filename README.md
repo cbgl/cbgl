@@ -405,6 +405,8 @@ Handed through to `fsm_localisation` and refused by that package's own validator
 
 `size_scan` is how many rays a scan is reduced to, once, before the sift. The same reduced scan is what the sift, the refinement and the selection all work from, and the cast from the map is taken at the same length. `0` uses every ray the scan carries, and a scan carrying fewer rays than this is refused.
 
+**A sensor that does not see all the way round needs this changed.** The shipped `360` is a full turn's worth of rays, so a sensor covering three quarters of one at the same spacing carries 270 and is refused as too short, with a message that names the ray count and not the aperture. Set `size_scan: 0` to take every ray the sensor sends, or to that sensor's own ray count. Nothing derives it for you, and the refusal will not tell you the aperture is why.
+
 `xy_bound` is shipped at 1.2 m against the matcher's own default of 0.2 m, because a survivor of the sift stands at the centre of a cell and can be a cell or more from the truth.
 
 The last three settings are behaviours that are **unconditional** in the matcher this algorithm originally shipped with, and optional in the one it now borrows. The shipped file turns all three on, because leaving them off would be refining with a different matcher and calling it the same one.

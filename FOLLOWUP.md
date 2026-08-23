@@ -24,11 +24,13 @@ This is the division of labour the design asks for: reduction and gap filling be
 
 Where the measured scan itself reports nothing but its maximum range, every candidate scores infinity, so the survivors of the sift are arbitrary and the matcher then refuses each of them on its own first cast. The run is refused, correctly, but under the least specific reason available rather than under one saying that the measurement carried no information. A test pins the current behaviour, so making it more informative would be a deliberate change rather than an accidental one.
 
-### One refusal is not reachable through an occupancy grid, and the guard is kept anyway
+### One refusal has two sources, and one of them is not reachable through an occupancy grid
 
-`no_scorable_pose` is raised where every corrected pose rescores to infinity, meaning the winner's own cast into the map met nothing. That cannot happen with an occupancy grid. The matcher tests every step it takes against the grid's own notion of free space, so a step that would leave free space or leave the grid triggers a recovery instead of being accepted, and a cast from free space in a bounded room always meets a wall. Measured over eighty attempts on both fixture grids, with five poses hugging the border and four measurements chosen to send the matcher outward, with the translation bound both on and off: seventy seven answered, three were refused, none landed off free space, and the furthest any pose walked was 1.554 m.
+`no_scorable_pose` is raised where the winning pose scores infinity, which means its cast met nothing anywhere.
 
-The guard is kept because a localiser is constructed around a grid reference rather than around an occupancy grid by name, so a caller may hand in something else, and the guard is what stops such a reference producing a confident answer from a cast that met nothing. It is covered by a test that supplies exactly that, with the artificiality stated in the test so nobody removes the guard as unreachable.
+On the refined paths that cannot happen through an occupancy grid. The matcher tests every step against the grid's own free space, so a corrected pose is always on free space of the same map, and a cast in a bounded room always meets a wall. The guard is kept because `Localiser` is built around `FSM::GridReference` rather than an occupancy grid by name, so a caller may hand in something else.
+
+On the `none` path it is raised from the sift's own best score instead, with no refinement between the cast and the refusal. That source is reachable: a hypothesis whose cast met nothing scores infinity and, where every hypothesis does, the best of them still does.
 
 ### Hypotheses are drawn at cell centres
 
@@ -131,9 +133,11 @@ That comparison lives in a sibling repository, `cbgl-tests`, laid out beside thi
 
 `xy_bound` is shipped at 1.2 m against the matcher's own default of 0.2 m, because a survivor of the sift stands at a cell centre and can be a cell or more from the truth. Measured over the 1005 trials that met the bar: the answer sits a median of 0.124 m from the nearest hypothesis it was handed, ninetieth percentile 0.224 m, worst 0.370 m, and 165 of the 1005 are beyond 0.2 m. So a 0.2 m bound would clip about one trial in six. The ROS 1 build needs the same reach, 0.132 m median and 0.364 m worst, so the requirement comes from the shipped hypothesis density rather than from anything this port chose. The refinement is not wandering: all 1005 landed inside the bar.
 
-### Refining against the map costs less per run, by three to eleven times
+### Refining against the map costs less per run, by three to five times
 
-The ROS 1 refinement cast once per survivor and this one casts at every pose it tries, so a refinement is not obviously cheaper per survivor. The whole run is nonetheless faster: 3.30 to 5.16 times on raw wall clock against the ROS 1 build's matcher path, and 6.09 to 10.35 times against the ICP path it ships by default. Those ratios are an upper bound, the two builds being unable to measure the same interval because the ROS 1 service call disperses and returns rather than localising; crediting it its own self report gives a floor of 3.08 to 5.00. The earlier finding within this build still holds, that `top_k_caers` governs execution time far more than the map's size does.
+The ROS 1 refinement casts once per survivor and this one casts at every pose it tries, so a refinement is not obviously cheaper per survivor. The whole run is nonetheless faster. Measured on the real map at two hundred trials a side, with both builds carrying every repair made to date: 5.1 times against the ROS 1 scan matcher path, 4.5 times against its point to line path at three quarters of a turn, and 4.0 times against that path at a full turn.
+
+An earlier reading of this gap put the point to line ratio at 6.09 to 10.35 times. That was measured before the ROS 1 line was repaired, and its point to line path was then carrying a defect in how it sized a cast, which cost it both accuracy and time. The figure above replaces it. The earlier finding within this build still holds, that `top_k_caers` governs execution time far more than the map's size does.
 
 ### Whether the concurrency holds up on a real building is still open
 
