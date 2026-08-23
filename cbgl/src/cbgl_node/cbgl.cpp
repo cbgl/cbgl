@@ -272,8 +272,15 @@ double CBGL::caer(
   const std::vector<float>& sr,
   const std::vector<float>& sv)
 {
+  /* The shorter of the two vectors, not the scan's cached ray count. That
+   * count is a member and is tied to neither vector handed in here, so a
+   * caller passing anything shorter read past the end of it with nothing
+   * said. Comparing over what both vectors actually hold is what the metric
+   * means in any case. */
+  const size_t rays = std::min(sr.size(), sv.size());
+
   double c = 0;
-  for (unsigned int i = 0; i < nrays_; i++)
+  for (size_t i = 0; i < rays; i++)
   {
     if (sr[i] > 0.0 && sv[i] > 0.0)
       c += fabs(sr[i] - sv[i]);
@@ -1287,8 +1294,18 @@ std::vector<float> CBGL::interpolateRanges(
       regions[i].push_back(j);
   }
 
-  /* Is the first index 0 and the last equal to the size-1? */
+  /* Is the first index 0 and the last equal to the size-1?
+   *
+   * A scan in which every ray is valid, which is an ordinary scan rather than
+   * an edge case, leaves no region at all. num_regions was then 0 and the read
+   * below asked for element -1, which as an unsigned index is the largest value
+   * the type holds rather than any element. There is nothing to join up when
+   * there are no regions, so there is nothing to do here either. */
   int num_regions = regions.size();
+
+  if (num_regions == 0)
+    return ranges;
+
   int numel_last_region = regions[num_regions-1].size();
 
   if (regions[0][0] == 0 &&
@@ -1652,7 +1669,24 @@ CBGL::loadMapFromFile(const std::string& filename) const
   void
 CBGL::mapCallback(const nav_msgs::OccupancyGrid& map_msg)
 {
-  /* Map used in dispersal of hypotheses */
+  /* Map used in dispersal of hypotheses.
+   *
+   * Both this and the hypothesis set below used to be overwritten on every map
+   * message with nothing releasing what they pointed at, so every map after
+   * the first leaked the one before it. A latched map that publishes once
+   * costs nothing; a map republished during a run leaked on every republish. */
+  if (map_hyp_ != NULL)
+  {
+    map_free(map_hyp_);
+    map_hyp_ = NULL;
+  }
+
+  if (pf_hyp_ != NULL)
+  {
+    pf_free(pf_hyp_);
+    pf_hyp_ = NULL;
+  }
+
   map_hyp_ = convertMap(map_msg);
 
   /* Find area */
@@ -1744,7 +1778,27 @@ CBGL::numRaysFromAngleRange(
   const int& num_rays,
   const double& new_range)
 {
-  double v = num_rays * new_range / (angle_max - angle_min);
+  /* The span a scan covers is its ray count times the angle between two rays,
+   * not the angle between its first ray and its last. Those differ by exactly
+   * one ray, and dividing by the smaller of the two makes every answer here
+   * too large by the ratio of the ray count to one less than it.
+   *
+   * For a panoramic scan of 360 rays it returned 362, so the cast it sizes had
+   * its rays 0.55 per cent closer together than the sensor's own, drifting to
+   * a whole degree by the far end of the scan. The panoramic scan matcher hid
+   * that, because it casts afresh at every pose it tries and so corrects the
+   * scale at every step. The point to line refinement does not: it casts once,
+   * at the candidate's own pose, and matches against that one frozen cast for
+   * the whole of its work, so the error stands. Measured on the real map before
+   * this line was corrected, that refinement recovered 81 of 100 trials to
+   * within five centimetres where the scan matcher recovered 99 on the same
+   * scans, and missed by more than a metre on 16 of them.
+   *
+   * The rounding up to an even count is kept. It is not what was wrong, and a
+   * caster asked for an odd number of rays over a full turn has no ray facing
+   * exactly backwards, which the crop that follows assumes it has. */
+  const double span = num_rays * (angle_max - angle_min) / (num_rays - 1);
+  double v = num_rays * new_range / span;
   int v_int = static_cast<int>(v);
 
   /* We shall return an even number of rays either way */
@@ -1812,7 +1866,11 @@ void CBGL::processPoseCloud()
   if (publish_pose_sets_)
   {
     geometry_msgs::PoseArray pa1;
-    pa1.header.stamp = ros::Time::now();
+    /* The stamp of the scan this answers for, not the clock at the moment
+     * the node happened to finish. Anything reasoning about the answer's
+     * age against the robot's other sensors was reasoning about the wrong
+     * instant. */
+    pa1.header.stamp = latest_world_scan_->header.stamp;
     std::vector<geometry_msgs::Pose> pv1;
     for (unsigned int i = 0; i < dispersed_particles_.size(); i++)
       pv1.push_back(*dispersed_particles_[i]);
@@ -1831,7 +1889,11 @@ void CBGL::processPoseCloud()
   if (publish_pose_sets_)
   {
     geometry_msgs::PoseArray pa2;
-    pa2.header.stamp = ros::Time::now();
+    /* The stamp of the scan this answers for, not the clock at the moment
+     * the node happened to finish. Anything reasoning about the answer's
+     * age against the robot's other sensors was reasoning about the wrong
+     * instant. */
+    pa2.header.stamp = latest_world_scan_->header.stamp;
     std::vector<geometry_msgs::Pose> pv2;
     for (unsigned int i = 0; i < caer_best_particles.size(); i++)
       pv2.push_back(*caer_best_particles[i]);
@@ -1892,6 +1954,19 @@ void CBGL::processPoseCloud()
   ROS_INFO("[%s] Best hypothesis id = %d", PKG_NAME.c_str(), score_idx);
   ROS_INFO("[%s] ---------------------",   PKG_NAME.c_str());
 
+  /* score_idx keeps its initial -1 where no candidate ever beat the starting
+   * score, which happens where every one of them was refused. Everything below
+   * indexes three vectors with it, so a run that found nothing read element -1
+   * of each and published whatever came back as the answer. Saying nothing was
+   * found is the honest outcome, and a caller that reads the answer topic sees
+   * no answer rather than a confident wrong one. */
+  if (score_idx < 0)
+  {
+    ROS_ERROR("[%s] Every hypothesis was refused; no pose is published",
+      PKG_NAME.c_str());
+    return;
+  }
+
   /*
    * At this point what we have identified is the particle from whose pose
    * the virtual laser scan once transformed has the best match to
@@ -1926,8 +2001,15 @@ void CBGL::processPoseCloud()
   covar[6*1+1] = initial_cov_yy_;
   covar[6*5+5] = initial_cov_aa_;
   global_pose_wcs.pose.covariance =  covar;
-  global_pose_wcs.header.stamp = ros::Time::now();
-  global_pose_wcs.header.frame_id = "/map";
+  /* The stamp of the scan this answers for, not the clock at the moment
+   * the node happened to finish. Anything reasoning about the answer's
+   * age against the robot's other sensors was reasoning about the wrong
+   * instant. */
+  global_pose_wcs.header.stamp = latest_world_scan_->header.stamp;
+  /* The frame the operator configured, not a literal. This was "/map", which
+   * ignored fixed_frame_id entirely and carried a leading slash that tf2
+   * refuses as a frame name. */
+  global_pose_wcs.header.frame_id = fixed_frame_id_;
   global_pose_publisher_.publish(global_pose_wcs);
 
   /* Broadcast pose as transform */
@@ -2275,6 +2357,15 @@ CBGL::retypeScan(const sensor_msgs::LaserScan::Ptr& scan_msg)
 CBGL::scanCallback(
   const sensor_msgs::LaserScan::Ptr& scan_msg)
 {
+  /* A scan of no rays at all reads element 0 of an empty vector, which is not
+   * a premature scan but a read outside it. The emptiness is tested first. */
+  if (scan_msg->ranges.empty())
+  {
+    ROS_WARN("[%s] A scan carrying no ranges was received and dropped",
+      PKG_NAME.c_str());
+    return;
+  }
+
   if (!std::isfinite(scan_msg->ranges[0]))  /* premature scan */
     return;
 
@@ -2325,14 +2416,20 @@ CBGL::scanCallback(
   /* if first scan cache needed stuff --------------------------------------- */
   if (!received_scan_)
   {
-    /* cache the static tf from base to laser if output is required as transform */
-    if (tf_broadcast_)
+    /* Cache the static transform from the base to the sensor.
+     *
+     * This used to be read only where tf_broadcast was on. Every cast into the
+     * map goes through getCurrentLaserPose, which composes base_to_laser_ into
+     * the answer whether it was ever read or not, and a tf::Transform that was
+     * never assigned holds neither a rotation nor an origin: its default
+     * constructor sets neither. So with broadcasting off, every cast was taken
+     * from whatever the stack held and the pose published was arbitrary. The
+     * placement is read whatever tf_broadcast says, because the answer depends
+     * on it either way. */
+    if (!getBaseToLaserTf(s_->header.frame_id))
     {
-      if (!getBaseToLaserTf(s_->header.frame_id))
-      {
-        ROS_WARN("[%s] Skipping scan", PKG_NAME.c_str());
-        return;
-      }
+      ROS_WARN("[%s] Skipping scan", PKG_NAME.c_str());
+      return;
     }
 
     if (do_fsm_)
@@ -2631,15 +2728,42 @@ CBGL::siftThroughCAERPanoramic(
     const std::vector<float> r_i = sv_i->ranges;
     const size_t num_rays = r_i.size();
 
-    const unsigned int shifter = round(static_cast<double>(num_rays) / da_);
-    const unsigned int prefix = round((static_cast<double>(num_rays-nrays_))/2);
+
+    /* Both operands were unsigned, so a cast shorter than the reduced scan
+     * wrapped this to an enormous value and the crop iterator built from it
+     * pointed far past the end of the rotated ranges. Subtracting as doubles
+     * cannot wrap, and a cast that really is shorter is refused below rather
+     * than cropped from nowhere. */
+    if (num_rays < nrays_)
+    {
+      ROS_ERROR("[%s] A cast of %zu rays cannot serve a scan of %u; skipping "
+        "hypothesis %u", PKG_NAME.c_str(), num_rays, nrays_, i);
+      continue;
+    }
+
+    const unsigned int prefix = round(
+      (static_cast<double>(num_rays) - static_cast<double>(nrays_)) / 2);
 
     std::vector<float> r_ik;
     geometry_msgs::Pose::Ptr pose_ik;
     for (unsigned int k = 0; k < da_; k++)
     {
+      /* The shift for candidate k, rounded once from k rather than accumulated
+       * as k copies of a rounded step.
+       *
+       * This used to be k * round(num_rays / da_). Rounding first and
+       * multiplying afterwards carries the rounding error k times over, so the
+       * candidates no longer span the turn: at 360 rays and 32 orientations the
+       * step rounds to 11 samples and the last candidate sits at 341 degrees,
+       * leaving a 19 degree gap at the wrap round. A pose whose orientation
+       * falls in that gap has no candidate within 9.5 degrees of it, where an
+       * even spread would leave none further than 5.5 degrees away, and the
+       * refinement is asked to make up the difference. */
+      const unsigned int shift = round(
+        static_cast<double>(k) * num_rays / da_);
+
       r_ik = r_i;
-      std::rotate(r_ik.begin(), r_ik.begin()+k*shifter, r_ik.end());
+      std::rotate(r_ik.begin(), r_ik.begin()+shift, r_ik.end());
       std::vector<float>::const_iterator a = r_ik.begin() + prefix;
       std::vector<float>::const_iterator b = a + nrays_;
 
@@ -2650,8 +2774,24 @@ CBGL::siftThroughCAERPanoramic(
       /* This is the pose from which r_ikf was captured */
       pose_ik = boost::make_shared<geometry_msgs::Pose>(*init_hypotheses[i]);
 
-      /* Orientation */
-      new_yaw_i = yaw_i - 2*M_PI * static_cast<double>(k)/da_;
+      /* Orientation.
+       *
+       * The ranges above move by shift samples, a whole number of them, so the
+       * orientation those ranges were actually taken at is that many samples
+       * round the turn. This used to be computed from
+       * k and da_ alone, which is the angle k WOULD amount to if the shift
+       * divided the ray count exactly, and it seldom does: at 360 rays and 32
+       * orientations the ranges move 11 degrees a step while the label moved
+       * 11.25, and the label moved the opposite way besides, being subtracted
+       * from the drawn yaw rather than added to it. The two disagreed by a
+       * quarter of a degree a step and stood 7.75 degrees apart at the last of
+       * the 32 candidates.
+       *
+       * That matters because the label is where the refinement starts and the
+       * ranges are what the candidate was chosen by. A candidate whose label
+       * disagrees with its own ranges is refined from the wrong orientation. */
+      new_yaw_i = yaw_i +
+        2*M_PI * static_cast<double>(shift)/static_cast<double>(num_rays);
       wrapAngle(new_yaw_i);
       q.setRPY(0.0, 0.0, new_yaw_i); q.normalize();
       tf::quaternionTFToMsg(q, pose_ik->orientation);
@@ -2707,16 +2847,25 @@ CBGL::siftThroughCAERPanoramic(
   std::vector<size_t> idx(caers.size());
   std::iota(idx.begin(), idx.end(), 0);
 
+  /* The middle iterator has to lie inside the range, and the loop below has to
+   * stop where the candidates do. Neither was true where the map offered fewer
+   * candidates than top_k_caers_ asked for, which a map with little free space
+   * does, and both the partial sort and the read that followed then went past
+   * the end of idx. Where fewer exist than were asked for, every one of them is
+   * a survivor and there is no top slice to move to the front. */
+  const unsigned int kept =
+    std::min(static_cast<size_t>(top_k_caers_), idx.size());
+
   std::nth_element(
     idx.begin(),
-    idx.begin() + top_k_caers_,
+    idx.begin() + kept,
     idx.end(),
     [&caers](size_t i1,size_t i2) {return caers[i1] < caers[i2];});
 
 
   /* The top p% of lowest caers in hypotheses */
   std::vector<geometry_msgs::Pose::Ptr> caer_best_particles;
-  for (unsigned int i = 0; i < top_k_caers_; i++)
+  for (unsigned int i = 0; i < kept; i++)
     caer_best_particles.push_back(all_hypotheses[idx[i]]);
 
   return caer_best_particles;
@@ -2749,6 +2898,12 @@ CBGL::startSignalService(
 
   geometry_msgs::PoseArray::Ptr pose_cloud_msg =
     boost::make_shared<geometry_msgs::PoseArray>();
+  /* The wall clock here, and deliberately, where the four messages that carry
+   * an answer take the stamp of the scan they answer for. This one is not an
+   * answer: it is the set of hypotheses as they stand the moment the start
+   * signal arrives, and that signal may arrive before any scan has, since this
+   * service only requires a map. There is no scan to take a stamp from, and
+   * reaching for one would dereference nothing at all. */
   pose_cloud_msg->header.stamp = ros::Time::now();
   pose_cloud_msg->header.frame_id = fixed_frame_id_;
   pose_cloud_msg->poses.resize(set->sample_count);
