@@ -36,11 +36,6 @@ int main(int argc, char** argv)
   }
   catch (const std::exception& ex)
   {
-    /* Written twice on purpose. The logger reaches an operator watching the
-     * ROS output, and the stream reaches one reading a terminal or a launch
-     * log, which is where somebody debugging a node that will not start
-     * actually looks. A refusal nobody can read is barely better than a
-     * crash. */
     fprintf(stderr, "%s\n", ex.what());
     fflush(stderr);
     ROS_FATAL("%s", ex.what());

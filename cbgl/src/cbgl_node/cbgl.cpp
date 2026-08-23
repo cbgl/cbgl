@@ -99,27 +99,20 @@ CBGL::CBGL(
   nh_private_.param<std::string>("pkg_name", PKG_NAME, "CBGL");
   ROS_INFO("[%s] Initialising ...", PKG_NAME.c_str());
 
-  /* initialise needed parameters */
   initParams();
 
-  /* publishers */
-
-  /* The result */
   global_pose_publisher_ =
     nh_.advertise<geometry_msgs::PoseWithCovarianceStamped>(
       output_pose_topic_, 1);
 
-  /* Publisher of execution time */
   execution_time_publisher_ =
     nh_.advertise<std_msgs::Duration>(
       ros::this_node::getName() + "/execution_time", 10);
 
-  /* Publisher of the id of the best hypothesis */
   best_particle_publisher_ =
     nh_.advertise<std_msgs::UInt64>(
       ros::this_node::getName() + "/best_particle", 10);
 
-  /* Self-described; for debugging/analysis purposes */
   all_hypotheses_publisher_ =
     nh_.advertise<geometry_msgs::PoseArray>(
       ros::this_node::getName() + "/particlecloud_all",
@@ -132,23 +125,14 @@ CBGL::CBGL(
     nh_.advertise<geometry_msgs::PoseArray>(
       ros::this_node::getName() + "/particlecloud_top_k_caers", top_k_caers_);
 
-  /* The world scan is published through this publisher */
   world_scan_publisher_ =
     nh_.advertise<sensor_msgs::LaserScan>(
       ros::this_node::getName() + "/world_scan", 1);
 
-  /* The map scan is published through this publisher */
   map_scan_publisher_ =
     nh_.advertise<sensor_msgs::LaserScan>(
       ros::this_node::getName() + "/map_scan", 1);
 
-  /* subscribers */
-
-  /*
-   * The map arrives either from a topic or, read once here, from a map
-   * description file on disk; map_topic wins when both are configured, so
-   * that the two sources can never be mixed mid-run
-   */
   if (!map_topic_.empty())
   {
     if (!map_file_.empty())
@@ -165,11 +149,9 @@ CBGL::CBGL(
     throw std::runtime_error(
       "[" + PKG_NAME + "] One of map_topic or map_file is required");
 
-  /* This is the scan subscriber */
   scan_subscriber_ = nh_.subscribe(scan_topic_, 1,
     &CBGL::scanCallback, this);
 
-  /* Call me for a fun time */
   global_localisation_service_ =
     nh_.advertiseService(
       ros::this_node::getName() + "/" + global_localisation_service_name_,
@@ -189,7 +171,6 @@ CBGL::~CBGL()
 {
   if (cachedFFTW3Plans_ == true)
   {
-    /* Clean up FFTW plans */
     if (r2rp_)
     {
       fftw_destroy_plan(r2rp_);
@@ -202,7 +183,6 @@ CBGL::~CBGL()
       c2rp_ = nullptr;
     }
 
-    /* Clean up FFTW global state */
     fftw_cleanup();
   }
 
@@ -215,13 +195,7 @@ CBGL::~CBGL()
 void CBGL::broadcast_global_pose_tf(
   const geometry_msgs::Pose& pose)
 {
-  /*
-   * (base --> map) = (base --> odom) x (odom --> map)
-   * therefore
-   * (odom --> map) = (odom --> base) x (base --> map)
-   */
 
-  /* base <-- odom */
   ros::Time t = ros::Time::now();
   tf::StampedTransform odom_to_base_tf;
   try
@@ -237,12 +211,10 @@ void CBGL::broadcast_global_pose_tf(
       PKG_NAME.c_str(), odom_frame_id_.c_str(), base_frame_id_.c_str(), ex.what());
   }
 
-  /* map <-- base */
   tf::Transform base_to_map_tf;
   createTfFromXYTheta(pose.position.x, pose.position.y, extractYawFromPose(pose),
     base_to_map_tf);
 
-  /* (odom --> map) */
   tf::Transform odom_to_map_tf = base_to_map_tf * odom_to_base_tf;
   tf_broadcaster_.sendTransform(
     tf::StampedTransform(odom_to_map_tf, ros::Time::now(),
@@ -272,11 +244,6 @@ double CBGL::caer(
   const std::vector<float>& sr,
   const std::vector<float>& sv)
 {
-  /* The shorter of the two vectors, not the scan's cached ray count. That
-   * count is a member and is tied to neither vector handed in here, so a
-   * caller passing anything shorter read past the end of it with nothing
-   * said. Comparing over what both vectors actually hold is what the metric
-   * means in any case. */
   const size_t rays = std::min(sr.size(), sv.size());
 
   double c = 0;
@@ -295,7 +262,6 @@ double CBGL::caer(
   void
 CBGL::cacheFFTW3Plans(const unsigned int& sz)
 {
-  /* Create forward plan */
   double* r2r_in;
   double* r2r_out;
 
@@ -304,7 +270,6 @@ CBGL::cacheFFTW3Plans(const unsigned int& sz)
 
   r2rp_ = fftw_plan_r2r_1d(sz, r2r_in, r2r_out, FFTW_R2HC, FFTW_MEASURE);
 
-  /* Create backward plan */
   fftw_complex* c2r_in;
   double* c2r_out;
 
@@ -313,7 +278,6 @@ CBGL::cacheFFTW3Plans(const unsigned int& sz)
 
   c2rp_ = fftw_plan_dft_c2r_1d(sz, c2r_in, c2r_out, FFTW_MEASURE);
 
-  /* Free the temporary arrays */
   fftw_free(r2r_in);
   fftw_free(r2r_out);
   fftw_free(c2r_in);
@@ -348,7 +312,6 @@ CBGL::convertMap(const nav_msgs::OccupancyGrid& map_msg)
   map->origin_y = map_msg.info.origin.position.y
     + map->origin_sin_yaw * half_x + map->origin_cos_yaw * half_y;
 
-  /* Convert to player format */
   map->cells = (map_cell_t*)malloc(sizeof(map_cell_t)*map->size_x*map->size_y);
   ROS_ASSERT(map->cells);
   for(int i=0;i<map->size_x * map->size_y;i++)
@@ -382,7 +345,6 @@ void CBGL::convertMapToPNG(
   unsigned int ic = 0;
   for (size_t i = 0; i < map_msg.data.size(); i++)
   {
-    /* black */
     if (map_msg.data[i] == 100)
     {
       converted[ic+0] = 0;
@@ -391,7 +353,6 @@ void CBGL::convertMapToPNG(
       converted[ic+3] = 255;
     }
 
-    /* white */
     if (map_msg.data[i] == 0)
     {
       converted[ic+0] = 254;
@@ -400,7 +361,6 @@ void CBGL::convertMapToPNG(
       converted[ic+3] = 255;
     }
 
-    /* gray */
     if (map_msg.data[i] == -1)
     {
       converted[ic+0] = 205;
@@ -411,7 +371,6 @@ void CBGL::convertMapToPNG(
     ic += 4;
   }
 
-  /* Flip y axis */
   unsigned row_size = width * 4;  /* 4 bytes per pixel (RGBA) */
   std::vector<uint8_t> temp_row(row_size);
   for (unsigned y = 0; y < height / 2; ++y)
@@ -439,7 +398,6 @@ void CBGL::convertMapToPNG(
   std::vector<unsigned char> converted(4*map_msg.data.size());
   convertMapToPNG(map_msg, converted.data());
 
-  /* Store png to disc */
   unsigned int width = map_msg.info.width;
   unsigned int height = map_msg.info.height;
   std::vector<uint8_t> png;
@@ -470,18 +428,14 @@ CBGL::correctICPPose(
     tf::Transform map_to_base_tf;
     tf::poseMsgToTF(*icp_corrected_pose, map_to_base_tf);
 
-    /* Now express the icp-corrected amcl pose in terms of the map frame ... */
     tf::Transform icp_corrected_pose_tf = map_to_base_tf * f2b;
 
-    /* ... and convert the transform into a message */
     tf::poseTFToMsg(icp_corrected_pose_tf, *icp_corrected_pose);
 
-    /* Make sure the orientation is in the [-π,π] interval */
     wrapPoseOrientation(icp_corrected_pose);
   }
   else
   {
-    /* icp has failed: the icp-corrected pose falls back to the amcl pose */
     ROS_ERROR("[%s] ICP has failed; falling back to amcl pose", PKG_NAME.c_str());
   }
 }
@@ -523,7 +477,6 @@ CBGL::doFSM(
   const sensor_msgs::LaserScan::Ptr& latest_world_scan,
   sm_result* output, tf::Transform* f2b)
 {
-  /* Measure execution time */
 #if DEBUG_EXECUTION_TIMES == 1
   ros::Time start_icp = ros::Time::now();
 #endif
@@ -531,7 +484,6 @@ CBGL::doFSM(
   geometry_msgs::Pose::Ptr icp_corrected_pose =
     boost::make_shared<geometry_msgs::Pose>(*amcl_pose_msg);
 
-  /* Obtain the map scan ... */
   sensor_msgs::LaserScan::Ptr map_scan = scanMap(icp_corrected_pose,
     map_scan_method_, false);
 
@@ -544,27 +496,21 @@ CBGL::doFSM(
   std::vector<double> sr = retypeScan(latest_world_scan);
   std::vector<double> sv = retypeScan(map_scan);
 
-  /* The reference scan in 2d points */
   std::vector< std::pair<double,double> > vp;
   FSM::Utils::scan2points(sv, origin, &vp);
 
   FSM::output_params op;
   std::tuple<double,double,double> diff;
 
-  /*
-   * Do your magic thing
-   */
   FSM::Match::fmtdbh(sr, origin, vp, r2rp_, c2rp_, ip_, &op, &diff);
 
   double dx = std::get<0>(diff);
   double dy = std::get<1>(diff);
   double dt = std::get<2>(diff);
 
-  /* the correction of the laser's position, in the laser frame */
   tf::Transform corr_ch_l;
   createTfFromXYTheta(dx,dy,dt, corr_ch_l);
 
-  /* the correction of the base's position, in the base frame */
   f2b_ = base_to_laser_ * corr_ch_l * laser_to_base_;
   *f2b = f2b_;
   output->x[0] = dx;
@@ -572,7 +518,6 @@ CBGL::doFSM(
   output->x[2] = dt;
   output->valid = 1;
 
-  /* Delete the map scan ptr and the LDPs */
   map_scan.reset();
 
 #if DEBUG_EXECUTION_TIMES == 1
@@ -597,7 +542,6 @@ CBGL::doICP(
   const sensor_msgs::LaserScan::Ptr& latest_world_scan,
   sm_result* output, tf::Transform* f2b)
 {
-  /* Measure execution time */
 #if DEBUG_EXECUTION_TIMES == 1
   ros::Time start_icp = ros::Time::now();
 #endif
@@ -605,22 +549,17 @@ CBGL::doICP(
   geometry_msgs::Pose::Ptr icp_corrected_pose =
     boost::make_shared<geometry_msgs::Pose>(*amcl_pose_msg);
 
-  /* Convert the latest world scan into LDP form */
   LDP world_scan_ldp;
   laserScanToLDP(latest_world_scan, world_scan_ldp);
 
-  /* Obtain the map scan ... */
   sensor_msgs::LaserScan::Ptr map_scan = scanMap(icp_corrected_pose,
     map_scan_method_, false);
 
-  /* .. and turn into a suitable structure (LDP) for processing */
   LDP map_scan_ldp;
   laserScanToLDP(map_scan, map_scan_ldp);
 
-  /* Do the ICP thing */
   processScan(world_scan_ldp, map_scan_ldp, output, f2b);
 
-  /* Delete the map scan ptr and the LDPs */
   map_scan.reset();
   ld_free(world_scan_ldp);
   ld_free(map_scan_ldp);
@@ -691,11 +630,6 @@ CBGL::getBaseToLaserTf(const std::string& frame_id)
   {
     tf_listener_.waitForTransform(base_frame_id_, frame_id, t, ros::Duration(1.0));
 
-    /*
-     * The direction of the transform returned will be from the base_frame_id_
-     * to the frame_id. Which if applied to data, will transform data in
-     * the frame_id into the base_frame_id_.
-     */
     tf_listener_.lookupTransform(base_frame_id_, frame_id, t, base_to_laser_tf);
   }
   catch (tf::TransformException ex)
@@ -722,18 +656,14 @@ CBGL::getBaseToLaserTf(const std::string& frame_id)
   geometry_msgs::Pose
 CBGL::getCurrentLaserPose(const geometry_msgs::Pose& robot_pose)
 {
-  /* Transform the robot_pose to a transform */
   tf::Transform map_to_base_tf;
   tf::poseMsgToTF(robot_pose, map_to_base_tf);
 
-  /* Get the laser's pose in the map frame (as a transform) */
   tf::Transform map_to_laser_tf = map_to_base_tf * base_to_laser_;
 
-  /* Convert the transform into a message */
   geometry_msgs::Pose laser_pose;
   tf::poseTFToMsg(map_to_laser_tf, laser_pose);
 
-  /* Return the laser's pose */
   return laser_pose;
 }
 
@@ -747,21 +677,18 @@ CBGL::getCurrentLaserPose(const geometry_msgs::Pose& robot_pose)
 CBGL::handleInputPose(const geometry_msgs::Pose::Ptr& pose_msg,
   sm_result* output, tf::Transform* f2b)
 {
-  /* Return if the pose received from amcl contains nan's */
   if (nanInPose(pose_msg))
   {
     ROS_ERROR("[%s] pose contains nan's; aborting ...", PKG_NAME.c_str());
     return;
   }
 
-  /* Bail if already running */
   if (running_)
   {
     ROS_ERROR("[%s] Already running; aborting ...", PKG_NAME.c_str());
     return;
   }
 
-  /* Set status to running to block further execution */
   running_ = true;
 
   sensor_msgs::LaserScan::Ptr world_scan =
@@ -774,7 +701,6 @@ CBGL::handleInputPose(const geometry_msgs::Pose::Ptr& pose_msg,
   if (do_fsm_)
     doFSM(pose_msg, world_scan, output, f2b);
 
-  /* GUARD stand-down */
   running_ = false;
 }
 
@@ -871,12 +797,6 @@ CBGL::initParams()
     undersample_rate_ = 1;
     ROS_ERROR("[%s] undersample_rate", PKG_NAME.c_str());
   }
-  /*
-   * The angular progression of scanning depends on how the laser is mounted
-   * on the robot:
-   * a. On the turtlebot the laser faces upwards;
-   * b. On the rb1 the laser faces downwards
-   */
   if (laser_z_orientation_.compare("upwards") == 0)
     sgn_ = -1;
   else if (laser_z_orientation_.compare("downwards") == 0)
@@ -888,149 +808,114 @@ CBGL::initParams()
   }
 
 
-  /*
-   * **** CSM parameters - comments copied from algos.h (by Andrea Censi)
-   */
-
-  /* Maximum angular displacement between scans */
   if (!nh_private_.getParam ("max_angular_correction_deg", input_.max_angular_correction_deg))
   {
     input_.max_angular_correction_deg = 45.0;
     ROS_ERROR("[%s] max_angular_correction_deg", PKG_NAME.c_str());
   }
 
-  /* Maximum translation between scans (m) */
   if (!nh_private_.getParam ("max_linear_correction", input_.max_linear_correction))
   {
     input_.max_linear_correction = 0.50;
     ROS_ERROR("[%s] max_linear_correction", PKG_NAME.c_str());
   }
 
-  /* Maximum ICP cycle iterations */
   if (!nh_private_.getParam ("max_iterations", input_.max_iterations))
   {
     input_.max_iterations = 10;
     ROS_ERROR("[%s] max_iterations", PKG_NAME.c_str());
   }
 
-  /* A threshold for stopping (m) */
   if (!nh_private_.getParam ("epsilon_xy", input_.epsilon_xy))
   {
     input_.epsilon_xy = 0.000001;
     ROS_ERROR("[%s] epsilon_xy", PKG_NAME.c_str());
   }
 
-  /* A threshold for stopping (rad) */
   if (!nh_private_.getParam ("epsilon_theta", input_.epsilon_theta))
   {
     input_.epsilon_theta = 0.000001;
     ROS_ERROR("[%s] epsilon_theta", PKG_NAME.c_str());
   }
 
-  /* Maximum distance for a correspondence to be valid */
   if (!nh_private_.getParam ("max_correspondence_dist", input_.max_correspondence_dist))
   {
     input_.max_correspondence_dist = 0.3;
     ROS_ERROR("[%s] max_correspondence_dist", PKG_NAME.c_str());
   }
 
-  /* Noise in the scan (m) */
   if (!nh_private_.getParam ("sigma", input_.sigma))
   {
     input_.sigma = 0.010;
     ROS_ERROR("[%s] sigma", PKG_NAME.c_str());
   }
 
-  /* Use smart tricks for finding correspondences. */
   if (!nh_private_.getParam ("use_corr_tricks", input_.use_corr_tricks))
   {
     input_.use_corr_tricks = 1;
     ROS_ERROR("[%s] use_corr_tricks", PKG_NAME.c_str());
   }
 
-  /* Restart: Restart if error is over threshold */
   if (!nh_private_.getParam ("restart", input_.restart))
   {
     input_.restart = 0;
     ROS_ERROR("[%s] restart", PKG_NAME.c_str());
   }
 
-  /* Restart: Threshold for restarting */
   if (!nh_private_.getParam ("restart_threshold_mean_error", input_.restart_threshold_mean_error))
   {
     input_.restart_threshold_mean_error = 0.01;
     ROS_ERROR("[%s] restart_threshold_mean_error", PKG_NAME.c_str());
   }
 
-  /* Restart: displacement for restarting. (m) */
   if (!nh_private_.getParam ("restart_dt", input_.restart_dt))
   {
     input_.restart_dt = 1.0;
     ROS_ERROR("[%s] restart_dt", PKG_NAME.c_str());
   }
 
-  /* Restart: displacement for restarting. (rad) */
   if (!nh_private_.getParam ("restart_dtheta", input_.restart_dtheta))
   {
     input_.restart_dtheta = 0.1;
     ROS_ERROR("[%s] restart_dtheta", PKG_NAME.c_str());
   }
 
-  /* Max distance for staying in the same clustering */
   if (!nh_private_.getParam ("clustering_threshold", input_.clustering_threshold))
   {
     input_.clustering_threshold = 0.25;
     ROS_ERROR("[%s] clustering_threshold", PKG_NAME.c_str());
   }
 
-  /* Number of neighbour rays used to estimate the orientation */
   if (!nh_private_.getParam ("orientation_neighbourhood", input_.orientation_neighbourhood))
   {
     input_.orientation_neighbourhood = 20;
     ROS_ERROR("[%s] orientation_neighbourhood", PKG_NAME.c_str());
   }
 
-  /* If 0, it's vanilla ICP */
   if (!nh_private_.getParam ("use_point_to_line_distance", input_.use_point_to_line_distance))
   {
     input_.use_point_to_line_distance = 1;
     ROS_ERROR("[%s] use_point_to_line_distance", PKG_NAME.c_str());
   }
 
-  /* Discard correspondences based on the angles */
   if (!nh_private_.getParam ("do_alpha_test", input_.do_alpha_test))
   {
     input_.do_alpha_test = 0;
     ROS_ERROR("[%s] do_alpha_test", PKG_NAME.c_str());
   }
 
-  /* Discard correspondences based on the angles - threshold angle, in degrees */
   if (!nh_private_.getParam ("do_alpha_test_thresholdDeg", input_.do_alpha_test_thresholdDeg))
   {
     input_.do_alpha_test_thresholdDeg = 20.0;
     ROS_ERROR("[%s] do_alpha_test_thresholdDeg", PKG_NAME.c_str());
   }
 
-  /*
-   * Percentage of correspondences to consider: if 0.9,
-   * always discard the top 10% of correspondences with more error
-   */
   if (!nh_private_.getParam ("outliers_maxPerc", input_.outliers_maxPerc))
   {
     input_.outliers_maxPerc = 0.90;
     ROS_ERROR("[%s] outliers_maxPerc", PKG_NAME.c_str());
   }
 
-  /*
-   * Parameters describing a simple adaptive algorithm for discarding.
-   * 1) Order the errors.
-   * 2) Choose the percentile according to outliers_adaptive_order.
-   * (if it is 0.7, get the 70% percentile)
-   * 3) Define an adaptive threshold multiplying outliers_adaptive_mult
-   * with the value of the error at the chosen percentile.
-   * 4) Discard correspondences over the threshold.
-   * This is useful to be conservative; yet remove the biggest errors.
-   */
   if (!nh_private_.getParam ("outliers_adaptive_order", input_.outliers_adaptive_order))
   {
     input_.outliers_adaptive_order = 0.7;
@@ -1043,53 +928,36 @@ CBGL::initParams()
     ROS_ERROR("[%s] outliers_adaptive_mult", PKG_NAME.c_str());
   }
 
-  /*
-   * If you already have a guess of the solution, you can compute the polar angle
-   * of the points of one scan in the new position. If the polar angle is not a monotone
-   * function of the readings index, it means that the surface is not visible in the
-   * next position. If it is not visible, then we don't use it for matching.
-   */
   if (!nh_private_.getParam ("do_visibility_test", input_.do_visibility_test))
   {
     input_.do_visibility_test = 0;
     ROS_ERROR("[%s] do_visibility_test", PKG_NAME.c_str());
   }
 
-  /* no two points in laser_sens can have the same corr. */
   if (!nh_private_.getParam ("outliers_remove_doubles", input_.outliers_remove_doubles))
   {
     input_.outliers_remove_doubles = 1;
     ROS_ERROR("[%s] outliers_remove_doubles", PKG_NAME.c_str());
   }
 
-  /* If 1, computes the covariance of ICP using the method http://purl.org/censi/2006/icpcov */
   if (!nh_private_.getParam ("do_compute_covariance", input_.do_compute_covariance))
   {
     input_.do_compute_covariance = 0;
     ROS_ERROR("[%s] do_compute_covariance", PKG_NAME.c_str());
   }
 
-  /* Checks that find_correspondences_tricks gives the right answer */
   if (!nh_private_.getParam ("debug_verify_tricks", input_.debug_verify_tricks))
   {
     input_.debug_verify_tricks = 0;
     ROS_ERROR("[%s] debug_verify_tricks", PKG_NAME.c_str());
   }
 
-  /*
-   * If 1, the field 'true_alpha' (or 'alpha') in the first scan is used to compute the
-   * incidence beta, and the factor (1/cos^2(beta)) used to weight the correspondence.");
-   */
   if (!nh_private_.getParam ("use_ml_weights", input_.use_ml_weights))
   {
     input_.use_ml_weights = 0;
     ROS_ERROR("[%s] use_ml_weights", PKG_NAME.c_str());
   }
 
-  /*
-   * If 1, the field 'readings_sigma' in the second scan is used to weight the
-   * correspondence by 1/sigma^2
-   */
   if (!nh_private_.getParam ("use_sigma_weights", input_.use_sigma_weights))
   {
     input_.use_sigma_weights = 0;
@@ -1130,9 +998,7 @@ CBGL::initParams()
     ROS_ERROR("[%s] do_fsm", PKG_NAME.c_str());
   }
 
-  /* FSM Params */
   int int_param;
-  /* ------------------------------------------------------------------------ */
   if (!nh_private_.getParam ("num_iterations", int_param))
   {
     ROS_WARN("[%s] no num_iterations param found; resorting to defaults", PKG_NAME.c_str());
@@ -1141,21 +1007,18 @@ CBGL::initParams()
   else
     ip_.num_iterations = static_cast<unsigned int>(int_param);
 
-  /* ------------------------------------------------------------------------ */
   if (!nh_private_.getParam ("xy_bound", ip_.xy_bound))
   {
     ROS_WARN("[%s] no xy_bound param found; resorting to defaults", PKG_NAME.c_str());
     ip_.xy_bound = 0.2;
   }
 
-  /* ------------------------------------------------------------------------ */
   if (!nh_private_.getParam ("t_bound", ip_.t_bound))
   {
     ROS_WARN("[%s] no t_bound param found; resorting to defaults", PKG_NAME.c_str());
     ip_.t_bound = M_PI/4;
   }
 
-  /* ------------------------------------------------------------------------ */
   if (!nh_private_.getParam ("max_counter", int_param))
   {
     ROS_WARN("[%s] no max_counter param found; resorting to defaults", PKG_NAME.c_str());
@@ -1164,7 +1027,6 @@ CBGL::initParams()
   else
     ip_.max_counter = static_cast<unsigned int>(int_param);
 
-  /* ------------------------------------------------------------------------ */
   if (!nh_private_.getParam ("min_magnification_size", int_param))
   {
     ROS_WARN("[%s] no min_magnification_size param found; resorting to defaults",
@@ -1174,7 +1036,6 @@ CBGL::initParams()
   else
     ip_.min_magnification_size = static_cast<unsigned int>(int_param);
 
-  /* ------------------------------------------------------------------------ */
   if (!nh_private_.getParam ("max_magnification_size", int_param))
   {
     ROS_WARN("[%s] no max_magnification_size param found; resorting to defaults",
@@ -1184,7 +1045,6 @@ CBGL::initParams()
   else
     ip_.max_magnification_size = static_cast<unsigned int>(int_param);
 
-  /* ------------------------------------------------------------------------ */
   if (!nh_private_.getParam ("max_recoveries", int_param))
   {
     ROS_WARN("[%s] no max_recoveries param found; resorting to defaults", PKG_NAME.c_str());
@@ -1193,13 +1053,11 @@ CBGL::initParams()
   else
     ip_.max_recoveries = static_cast<unsigned int>(int_param);
 
-  /* state variables */
   f2b_.setIdentity();
   input_.laser[0] = 0.0;
   input_.laser[1] = 0.0;
   input_.laser[2] = 0.0;
 
-  /* Initialize output_ vectors as Null for error-checking */
   output_.cov_x_m = 0;
   output_.dx_dy1_m = 0;
   output_.dx_dy2_m = 0;
@@ -1208,9 +1066,7 @@ CBGL::initParams()
   assert(ip_.xy_bound >= 0.0);
   assert(ip_.t_bound >= 0.0);
   assert(ip_.max_counter > 0);
-  /* assert(ip_.min_magnification_size >= 0); */
   assert(ip_.max_magnification_size >= ip_.min_magnification_size);
-  /* assert(ip_.max_recoveries >= 0); */
   assert(undersample_rate_ >= 0);
 }
 
@@ -1224,10 +1080,8 @@ CBGL::initParams()
  */
 void CBGL::initRangeLibRayCasters()
 {
-  /* Max laser range in pixels */
   float max_range_rc = latest_world_scan_->range_max / map_res_;
 
-  /* Init ray-casters */
   if (map_scan_method_.compare("bresenham") == 0)
     br_ = ranges::BresenhamsLine(omap_, max_range_rc);
 
@@ -1282,7 +1136,6 @@ std::vector<float> CBGL::interpolateRanges(
       i++;
   }
 
-  /* Inflate to consecutive indices */
   for (unsigned int i = 0; i < regions.size(); i++)
   {
     int begin = regions[i][0];
@@ -1294,13 +1147,6 @@ std::vector<float> CBGL::interpolateRanges(
       regions[i].push_back(j);
   }
 
-  /* Is the first index 0 and the last equal to the size-1?
-   *
-   * A scan in which every ray is valid, which is an ordinary scan rather than
-   * an edge case, leaves no region at all. num_regions was then 0 and the read
-   * below asked for element -1, which as an unsigned index is the largest value
-   * the type holds rather than any element. There is nothing to join up when
-   * there are no regions, so there is nothing to do here either. */
   int num_regions = regions.size();
 
   if (num_regions == 0)
@@ -1316,16 +1162,6 @@ std::vector<float> CBGL::interpolateRanges(
 
     regions.erase(regions.begin(), regions.begin()+1);
   }
-
-  /*
-   * for (int i = 0; i < regions.size(); i++)
-   * {
-   * printf("region %d\n", i);
-   * for (int j = 0; j < regions[i].size(); j++)
-   * printf("%d,", regions[i][j]);
-   * printf("\n");
-   * }
-   */
 
   std::vector<float> ranges_interp = ranges;
 
@@ -1347,11 +1183,6 @@ std::vector<float> CBGL::interpolateRanges(
     for (unsigned int j = 0; j < regions[i].size(); j++)
       ranges_interp[regions[i][j]]= interp;
   }
-
-  /*
-   * for (int j = 0; j < ranges.size(); j++)
-   * printf("%f\n", ranges_interp[j]);
-   */
 
   return ranges_interp;
 }
@@ -1490,10 +1321,6 @@ CBGL::loadMapFromFile(const std::string& filename) const
       "keys to values, so it is not a map description; pointing map_file at "
       "an image or at any other file does this");
 
-  /* The map server reads `mode` as trinary, scale or raw, and the three give
-   * three different maps from one picture. This reads trinary. A description
-   * asking for either of the others is refused rather than quietly given the
-   * one it did not ask for. */
   if (yaml["mode"])
   {
     std::string mode;
@@ -1583,10 +1410,6 @@ CBGL::loadMapFromFile(const std::string& filename) const
   {
     if (yaml["negate"])
     {
-      /* Read as a number first and as a boolean second. The map server's own
-       * files carry 0 or 1, which is what a number reads, but `negate: false`
-       * is the natural way for a person to write it and refusing that at start
-       * up would be a refusal about spelling rather than about the map. */
       try
       {
         negate = yaml["negate"].as<double>();
@@ -1636,9 +1459,6 @@ CBGL::loadMapFromFile(const std::string& filename) const
   q.normalize();
   tf::quaternionTFToMsg(q, map_msg.info.origin.orientation);
 
-  /* A PGM's first row is the top of the image; an occupancy grid's first
-   * row is the one at the origin, i.e. the bottom, so rows are read back
-   * to front, exactly as the map server itself does */
   map_msg.data.resize(width * height);
   for (unsigned int row = 0; row < height; row++)
   {
@@ -1669,12 +1489,6 @@ CBGL::loadMapFromFile(const std::string& filename) const
   void
 CBGL::mapCallback(const nav_msgs::OccupancyGrid& map_msg)
 {
-  /* Map used in dispersal of hypotheses.
-   *
-   * Both this and the hypothesis set below used to be overwritten on every map
-   * message with nothing releasing what they pointed at, so every map after
-   * the first leaked the one before it. A latched map that publishes once
-   * costs nothing; a map republished during a run leaked on every republish. */
   if (map_hyp_ != NULL)
   {
     map_free(map_hyp_);
@@ -1689,14 +1503,11 @@ CBGL::mapCallback(const nav_msgs::OccupancyGrid& map_msg)
 
   map_hyp_ = convertMap(map_msg);
 
-  /* Find area */
   double area = freeArea(map_hyp_);
 
-  /* TODO(li9i) make these depend on the map's area */
   unsigned int min_particles_ = dl_ * area;
   unsigned int max_particles_ = dl_ * area;
 
-  /* The set of hypotheses */
   pf_hyp_ = pf_alloc(min_particles_, max_particles_, 0.001, 0.1,
     (pf_init_model_fn_t)CBGL::uniformPoseGenerator, (void *)map_hyp_);
   pf_hyp_->pop_err = 0.01;
@@ -1711,7 +1522,6 @@ CBGL::mapCallback(const nav_msgs::OccupancyGrid& map_msg)
   map_sin_yaw_ = sin(map_yaw_);
   map_cos_yaw_ = cos(map_yaw_);
 
-  /* Re-set the map png file */
   std::vector<unsigned char> converted(4*map_msg.data.size());
   convertMapToPNG(map_msg, converted.data());
   omap_ = ranges::OMap(converted.data(),
@@ -1778,30 +1588,10 @@ CBGL::numRaysFromAngleRange(
   const int& num_rays,
   const double& new_range)
 {
-  /* The span a scan covers is its ray count times the angle between two rays,
-   * not the angle between its first ray and its last. Those differ by exactly
-   * one ray, and dividing by the smaller of the two makes every answer here
-   * too large by the ratio of the ray count to one less than it.
-   *
-   * For a panoramic scan of 360 rays it returned 362, so the cast it sizes had
-   * its rays 0.55 per cent closer together than the sensor's own, drifting to
-   * a whole degree by the far end of the scan. The panoramic scan matcher hid
-   * that, because it casts afresh at every pose it tries and so corrects the
-   * scale at every step. The point to line refinement does not: it casts once,
-   * at the candidate's own pose, and matches against that one frozen cast for
-   * the whole of its work, so the error stands. Measured on the real map before
-   * this line was corrected, that refinement recovered 81 of 100 trials to
-   * within five centimetres where the scan matcher recovered 99 on the same
-   * scans, and missed by more than a metre on 16 of them.
-   *
-   * The rounding up to an even count is kept. It is not what was wrong, and a
-   * caster asked for an odd number of rays over a full turn has no ray facing
-   * exactly backwards, which the crop that follows assumes it has. */
   const double span = num_rays * (angle_max - angle_min) / (num_rays - 1);
   double v = num_rays * new_range / span;
   int v_int = static_cast<int>(v);
 
-  /* We shall return an even number of rays either way */
   if (v_int % 2 == 0)
     return v;
   else
@@ -1818,10 +1608,8 @@ CBGL::numRaysFromAngleRange(
 CBGL::poseCloudCallback(
   const geometry_msgs::PoseArray::Ptr& pose_cloud_msg)
 {
-  /* Store all the filter's particles */
   dispersed_particles_.clear();
 
-  /* Push back all particles from amcl */
   for (int i = 0; i < pose_cloud_msg->poses.size(); i++)
   {
     geometry_msgs::Pose::Ptr pose_i =
@@ -1833,7 +1621,6 @@ CBGL::poseCloudCallback(
   ROS_INFO("[%s] There are %zux%d particles in total",
     PKG_NAME.c_str(), dispersed_particles_.size(), da_);
 
-  /* Process cloud if all other conditions are satisfied */
   received_pose_cloud_ = true;
   if (received_scan_ && received_map_ && received_start_signal_)
     processPoseCloud();
@@ -1847,10 +1634,6 @@ void CBGL::processPoseCloud()
 {
   ros::Time start = ros::Time::now();
 
-  /*
-   * Construct the 3rd-party ray-casters AFTER both a scan and the map is
-   * received
-   */
   bool cond = received_scan_ &&
     received_pose_cloud_     &&
     received_start_signal_   &&
@@ -1859,17 +1642,11 @@ void CBGL::processPoseCloud()
   if (!cond)
     return;
 
-  /* Init raycasters with laser details */
   initRangeLibRayCasters();
 
-  /* Publish all hypotheses */
   if (publish_pose_sets_)
   {
     geometry_msgs::PoseArray pa1;
-    /* The stamp of the scan this answers for, not the clock at the moment
-     * the node happened to finish. Anything reasoning about the answer's
-     * age against the robot's other sensors was reasoning about the wrong
-     * instant. */
     pa1.header.stamp = latest_world_scan_->header.stamp;
     std::vector<geometry_msgs::Pose> pv1;
     for (unsigned int i = 0; i < dispersed_particles_.size(); i++)
@@ -1878,21 +1655,15 @@ void CBGL::processPoseCloud()
     all_hypotheses_publisher_.publish(pa1);
   }
 
-  /* Do not take ALL hypotheses, but only those with the 10 best caers */
   std::vector<geometry_msgs::Pose::Ptr> caer_best_particles =
     siftThroughCAERPanoramic(dispersed_particles_);
 
   ROS_INFO("[%s] I will consider only %zu hypotheses", PKG_NAME.c_str(),
     caer_best_particles.size());
 
-  /* Publish top caer hypotheses */
   if (publish_pose_sets_)
   {
     geometry_msgs::PoseArray pa2;
-    /* The stamp of the scan this answers for, not the clock at the moment
-     * the node happened to finish. Anything reasoning about the answer's
-     * age against the robot's other sensors was reasoning about the wrong
-     * instant. */
     pa2.header.stamp = latest_world_scan_->header.stamp;
     std::vector<geometry_msgs::Pose> pv2;
     for (unsigned int i = 0; i < caer_best_particles.size(); i++)
@@ -1901,7 +1672,6 @@ void CBGL::processPoseCloud()
     top_caer_hypotheses_publisher_.publish(pa2);
   }
 
-  /* After CAER phase: scan--to--map-scan match the top X best hypotheses */
   std::vector<sm_result> outputs;
   std::vector<tf::Transform> f2bs;
   double score = -1.0;
@@ -1923,21 +1693,15 @@ void CBGL::processPoseCloud()
     f2bs.push_back(f2b);
 
 
-    /*
-     * How to evaluate the best hypotheses AFTER matching?
-     * Via ICP's internal metric or CAER?
-     */
     bool icps_score = false;
     if (icps_score)
       score_i = output.valid * output.nvalid / fabs(output.error);
     else
     {
-      /* Apply transform to this hypothesis so that we may take the CAER */
       geometry_msgs::Pose::Ptr corrected_pose =
         boost::make_shared<geometry_msgs::Pose>(*caer_best_particles[i]);
       correctICPPose(corrected_pose, f2b);
 
-      /* Have CAER as score_i instead of ICP's metric */
       double c = caer(latest_world_scan_,
         scanMap(corrected_pose, map_scan_method_, false));
       score_i = 1.0 / (c+1e-10);
@@ -1954,12 +1718,6 @@ void CBGL::processPoseCloud()
   ROS_INFO("[%s] Best hypothesis id = %d", PKG_NAME.c_str(), score_idx);
   ROS_INFO("[%s] ---------------------",   PKG_NAME.c_str());
 
-  /* score_idx keeps its initial -1 where no candidate ever beat the starting
-   * score, which happens where every one of them was refused. Everything below
-   * indexes three vectors with it, so a run that found nothing read element -1
-   * of each and published whatever came back as the answer. Saying nothing was
-   * found is the honest outcome, and a caller that reads the answer topic sees
-   * no answer rather than a confident wrong one. */
   if (score_idx < 0)
   {
     ROS_ERROR("[%s] Every hypothesis was refused; no pose is published",
@@ -1967,11 +1725,6 @@ void CBGL::processPoseCloud()
     return;
   }
 
-  /*
-   * At this point what we have identified is the particle from whose pose
-   * the virtual laser scan once transformed has the best match to
-   * the input scan
-   */
   geometry_msgs::Pose::Ptr global_pose =
     boost::make_shared<geometry_msgs::Pose>(*caer_best_particles[score_idx]);
 
@@ -1989,10 +1742,8 @@ void CBGL::processPoseCloud()
   else
     ROS_ERROR("[%s] No valid pose found", PKG_NAME.c_str());
 
-  /* Publish execution time */
   measureExecutionTime(start, ros::Time::now());
 
-  /* Publish global pose */
   geometry_msgs::PoseWithCovarianceStamped global_pose_wcs;
   global_pose_wcs.pose.pose = *global_pose;
 
@@ -2001,22 +1752,13 @@ void CBGL::processPoseCloud()
   covar[6*1+1] = initial_cov_yy_;
   covar[6*5+5] = initial_cov_aa_;
   global_pose_wcs.pose.covariance =  covar;
-  /* The stamp of the scan this answers for, not the clock at the moment
-   * the node happened to finish. Anything reasoning about the answer's
-   * age against the robot's other sensors was reasoning about the wrong
-   * instant. */
   global_pose_wcs.header.stamp = latest_world_scan_->header.stamp;
-  /* The frame the operator configured, not a literal. This was "/map", which
-   * ignored fixed_frame_id entirely and carried a leading slash that tf2
-   * refuses as a frame name. */
   global_pose_wcs.header.frame_id = fixed_frame_id_;
   global_pose_publisher_.publish(global_pose_wcs);
 
-  /* Broadcast pose as transform */
   if (tf_broadcast_)
     broadcast_global_pose_tf(global_pose_wcs.pose.pose);
 
-  /* Publish the index of the best particle by caer standards */
   std_msgs::UInt64 np_msg;
   if (outputs[score_idx].valid == 1)
     np_msg.data = score_idx;
@@ -2024,7 +1766,6 @@ void CBGL::processPoseCloud()
     np_msg.data = -1;
   best_particle_publisher_.publish(np_msg);
 
-  /* Re-close down */
   received_start_signal_ = false;
 }
 
@@ -2039,15 +1780,6 @@ CBGL::processScan(LDP& world_scan_ldp, LDP& map_scan_ldp,
   sm_result* output, tf::Transform* f2b)
 {
   ros::WallTime start = ros::WallTime::now();
-
-  /*
-   * CSM is used in the following way:
-   * The scans are always in the laser frame
-   * The reference scan (prevLDPcan_) has a pose of [0, 0, 0]
-   * The new scan (currLDPScan) has a pose equal to the movement
-   * of the laser in the laser frame since the last scan
-   * The computed correction is then propagated using the tf machinery
-   */
 
   map_scan_ldp->odometry[0] = 0.0;
   map_scan_ldp->odometry[1] = 0.0;
@@ -2068,7 +1800,6 @@ CBGL::processScan(LDP& world_scan_ldp, LDP& map_scan_ldp,
   input_.first_guess[1] = 0.0;
   input_.first_guess[2] = 0.0;
 
-  /* If they are non-Null, free covariance gsl matrices to avoid leaking memory */
   if (output_.cov_x_m)
   {
     gsl_matrix_free(output_.cov_x_m);
@@ -2085,18 +1816,13 @@ CBGL::processScan(LDP& world_scan_ldp, LDP& map_scan_ldp,
     output_.dx_dy2_m = 0;
   }
 
-  /* scan match - using point to line icp from CSM */
-
   sm_icp(&input_, &output_);
 
-  /* https://github.com/AndreaCensi/csm/blob/master/sm/csm/algos.h#L138 */
   if (output_.valid)
   {
-    /* the correction of the laser's position, in the laser frame */
     tf::Transform corr_ch_l;
     createTfFromXYTheta(output_.x[0], output_.x[1], output_.x[2], corr_ch_l);
 
-    /* the correction of the base's position, in the base frame */
     f2b_ = base_to_laser_ * corr_ch_l * laser_to_base_;
   }
   else
@@ -2108,7 +1834,6 @@ CBGL::processScan(LDP& world_scan_ldp, LDP& map_scan_ldp,
   *output = output_;
   *f2b = f2b_;
 
-  /* statistics */
   double dur = (ros::WallTime::now() - start).toSec() * 1e3;
   ROS_DEBUG("[%s] Scan matcher total duration: %.1f ms", PKG_NAME.c_str(), dur);
 }
@@ -2130,11 +1855,6 @@ CBGL::readPGM(
   unsigned int* height,
   std::vector<unsigned char>* pixels) const
 {
-  /* What the path names is established before it is opened. An `image` key
-   * naming a character device reads until the memory runs out; one naming a
-   * pipe blocks here forever, and a node that never finishes starting and
-   * never says why is the worst of the outcomes available. Both are ruled out
-   * by insisting on an ordinary file of a sane size. */
   struct stat image_stat;
   if (stat(filename.c_str(), &image_stat) != 0)
     throw std::runtime_error(
@@ -2187,14 +1907,6 @@ CBGL::readPGM(
       "[" + PKG_NAME + "] Image file '" + filename +
       "' is not a PGM file of either the 'P2' or 'P5' variant");
 
-  /* Every header number is read as a 64 bit value and bounded before it is
-   * used to size anything. `std::stoul` alone is not enough on two counts: it
-   * accepts a leading minus, so a header of `-1` becomes the largest unsigned
-   * value, and it stops at the first character it cannot use, so `100abc`
-   * reads as 100 with nothing said. Narrowing such a value into an `unsigned
-   * int` and then multiplying two of them wraps, which sizes a buffer at one
-   * element for an image the loops below then walk across the whole index
-   * range. */
   auto header_number = [&filename, this](const std::string& token,
     const std::string& what) -> uint64_t
   {
@@ -2231,8 +1943,6 @@ CBGL::readPGM(
       "[" + PKG_NAME + "] Image file '" + filename + "' declares a maxval of " +
       std::to_string(maxval64) + ", and a PGM's is between 1 and 65535");
 
-  /* The product is taken in 64 bits and bounded before anything is sized from
-   * it, so that neither it nor the byte count below can wrap. */
   const uint64_t cells = w64 * h64;
   if (cells > kMaxPGMCells)
     throw std::runtime_error(
@@ -2240,12 +1950,6 @@ CBGL::readPGM(
       std::to_string(cells) + " cells, above the largest this reads, " +
       std::to_string(kMaxPGMCells));
 
-  /* The declared size is measured against the bytes the file actually holds
-   * before a byte is allocated from it. A header claiming a size the file
-   * cannot carry would otherwise commit gigabytes, touch every page of them,
-   * and be refused afterwards, which on a robot is the memory killer rather
-   * than a message. A binary sample takes at least one byte and a text one at
-   * least two counting its separator, so both give a floor. */
   const uint64_t bytes_left = image_bytes -
     std::min<uint64_t>(image_bytes, static_cast<uint64_t>(file.tellg()));
   const uint64_t bytes_needed = (magic == "P5")
@@ -2286,14 +1990,6 @@ CBGL::readPGM(
   }
   else  /* P5 */
   {
-    /* Exactly one whitespace character separates the header from the raw
-     * data. A file that carries two, which is what a CRLF separator gives and
-     * what any pass through a Windows editor produces, would otherwise put
-     * that second byte in as the first sample and shift every pixel of the
-     * image by one, with the truncation check below still satisfied because
-     * the file holds one byte more than it needs. That is a map wrong
-     * everywhere and silent, so the separator is checked rather than
-     * assumed. */
     const int separator = file.get();
     if (separator == EOF || !std::isspace(separator))
       throw std::runtime_error(
@@ -2357,8 +2053,6 @@ CBGL::retypeScan(const sensor_msgs::LaserScan::Ptr& scan_msg)
 CBGL::scanCallback(
   const sensor_msgs::LaserScan::Ptr& scan_msg)
 {
-  /* A scan of no rays at all reads element 0 of an empty vector, which is not
-   * a premature scan but a read outside it. The emptiness is tested first. */
   if (scan_msg->ranges.empty())
   {
     ROS_WARN("[%s] A scan carrying no ranges was received and dropped",
@@ -2369,7 +2063,6 @@ CBGL::scanCallback(
   if (!std::isfinite(scan_msg->ranges[0]))  /* premature scan */
     return;
 
-  /* Undersample range scan if desirable ------------------------------------ */
   sensor_msgs::LaserScan::Ptr s_ =
     boost::make_shared<sensor_msgs::LaserScan>(*scan_msg);
   if (do_undersample_scan_)
@@ -2381,12 +2074,10 @@ CBGL::scanCallback(
         uranges.push_back(scan_msg->ranges[i]);
     }
 
-    /* The new scan message */
     s_->ranges = uranges;
     s_->angle_increment = undersample_rate_ * scan_msg->angle_increment;
   }
 
-  /* Store scan properties -------------------------------------------------- */
   nrays_ = s_->ranges.size();
   angle_inc_ = s_->angle_increment;
   angle_min_ = s_->angle_min;
@@ -2394,7 +2085,6 @@ CBGL::scanCallback(
   input_.max_reading = s_->range_max;
 
 
-  /* Store the latest scan -------------------------------------------------- */
   latest_world_scan_ =
     boost::make_shared<sensor_msgs::LaserScan>(*s_);
 
@@ -2403,29 +2093,16 @@ CBGL::scanCallback(
     if (!std::isfinite(s_->ranges[i]))
       latest_world_scan_->ranges[i] = 0;
   }
-  /* What's the lowest range? */
   double latest_world_scan_min_range_now =
     *min_element(s_->ranges.begin(), s_->ranges.end());
 
-  /* Remove garbage measurements if lowest measured range <= min sensor range */
   if (latest_world_scan_min_range_now <= latest_world_scan_->range_min)
     latest_world_scan_->ranges = interpolateRanges(latest_world_scan_->ranges,
       latest_world_scan_->range_min);
 
 
-  /* if first scan cache needed stuff --------------------------------------- */
   if (!received_scan_)
   {
-    /* Cache the static transform from the base to the sensor.
-     *
-     * This used to be read only where tf_broadcast was on. Every cast into the
-     * map goes through getCurrentLaserPose, which composes base_to_laser_ into
-     * the answer whether it was ever read or not, and a tf::Transform that was
-     * never assigned holds neither a rotation nor an origin: its default
-     * constructor sets neither. So with broadcasting off, every cast was taken
-     * from whatever the stack held and the pose published was arbitrary. The
-     * placement is read whatever tf_broadcast says, because the answer depends
-     * on it either way. */
     if (!getBaseToLaserTf(s_->header.frame_id))
     {
       ROS_WARN("[%s] Skipping scan", PKG_NAME.c_str());
@@ -2436,7 +2113,6 @@ CBGL::scanCallback(
       cacheFFTW3Plans(s_->ranges.size());
   }
 
-  /* Good to go ------------------------------------------------------------- */
   received_scan_ = true;
   if (received_map_ && received_pose_cloud_ && received_start_signal_)
     processPoseCloud();
@@ -2465,10 +2141,6 @@ CBGL::scanMap(
   ros::Time start = ros::Time::now();
 #endif
 
-  /*
-   * Get the laser's pose: the map scan needs that one, not the pose of the
-   * robot!
-   */
   const geometry_msgs::Pose current_laser_pose =
     getCurrentLaserPose(*robot_pose);
 
@@ -2478,7 +2150,6 @@ CBGL::scanMap(
   sensor_msgs::LaserScan::Ptr map_scan;
 
 
-  /* Scan the map using the occupancy_grid_utils method */
   if (scan_method.compare("vanilla") == 0)
   {
     map_scan = occupancy_grid_utils::simulateRangeScan(map_, current_laser_pose,
@@ -2488,13 +2159,6 @@ CBGL::scanMap(
     scan_method.compare("bresenham")    == 0 ||
     scan_method.compare("cddt")         == 0)
   {
-    /* Convert laser position to grid coordinates. The grid the raycaster
-     * holds is the map message's own cells, so a world position has to be
-     * brought into the map's own axes and measured from the map's origin
-     * before it can index into it, and the heading cast at has to be
-     * relative to those same axes. Where the origin is the world origin
-     * with no rotation this reduces to the position over the resolution,
-     * which is what it was. */
     const double dx =
       current_laser_pose.position.x - map_.info.origin.position.x;
     const double dy =
@@ -2505,25 +2169,12 @@ CBGL::scanMap(
       (-map_sin_yaw_ * dx + map_cos_yaw_ * dy) / map_.info.resolution;
     float a = extractYawFromPose(current_laser_pose) - map_yaw_;
 
-    /*
-     * How many rays?
-     * int num_rays = numRaysFromAngleRange(latest_world_scan_->angle_min,
-     * latest_world_scan_->angle_max, nrays_,
-     * laser_scan_info->angle_max - laser_scan_info->angle_min);
-     */
-
     double min_a = laser_scan_info->angle_min;
     double inc_a = laser_scan_info->angle_increment;
 
     map_scan = boost::make_shared<sensor_msgs::LaserScan>(*laser_scan_info);
     map_scan->ranges.clear();
 
-    /*
-     * The angular progression of scanning depends on how the laser is mounted
-     * on the robot:
-     * a. On the turtlebot the laser faces upwards;
-     * b. On the rb1 the laser faces downwards
-     */
     int sgn = 0;
     if (laser_z_orientation_.compare("upwards") == 0)
       sgn = -1;
@@ -2534,14 +2185,6 @@ CBGL::scanMap(
       ROS_ERROR("[%s] Please provide a valid value", PKG_NAME.c_str());
       ROS_ERROR("       for param laser_z_orientation");
     }
-
-    /*
-     * Iterate over all angles.
-     * Calculate range for every angle (calc_range returns range in pixels).
-     * The angles start counting negatively.
-     * For details see
-     * https://github.com/kctess5/range_libc/blob/deploy/docs/RangeLibcUsageandInformation.pdf
-     */
 
     if (scan_method.compare("ray_marching") == 0)
     {
@@ -2603,7 +2246,6 @@ CBGL::scanMapPanoramic(
   sensor_msgs::LaserScan::Ptr map_scan;
 
 
-  /* Scan the map using the occupancy_grid_utils method */
   if (scan_method.compare("vanilla") == 0)
   {
     map_scan = occupancy_grid_utils::simulateRangeScan(map_, current_laser_pose,
@@ -2613,13 +2255,6 @@ CBGL::scanMapPanoramic(
     scan_method.compare("bresenham")    == 0 ||
     scan_method.compare("cddt")         == 0)
   {
-    /* Convert laser position to grid coordinates. The grid the raycaster
-     * holds is the map message's own cells, so a world position has to be
-     * brought into the map's own axes and measured from the map's origin
-     * before it can index into it, and the heading cast at has to be
-     * relative to those same axes. Where the origin is the world origin
-     * with no rotation this reduces to the position over the resolution,
-     * which is what it was. */
     const double dx =
       current_laser_pose.position.x - map_.info.origin.position.x;
     const double dy =
@@ -2630,11 +2265,8 @@ CBGL::scanMapPanoramic(
       (-map_sin_yaw_ * dx + map_cos_yaw_ * dy) / map_.info.resolution;
     float a = extractYawFromPose(current_laser_pose) - map_yaw_;
 
-    /* How many rays? */
     int num_rays = numRaysFromAngleRange(latest_world_scan_->angle_min,
       latest_world_scan_->angle_max, nrays_, 2*M_PI);
-
-    /* printf("%d,%d\n", nrays_, num_rays); */
 
 
     double min_a = M_PI;
@@ -2643,12 +2275,6 @@ CBGL::scanMapPanoramic(
     map_scan = boost::make_shared<sensor_msgs::LaserScan>(*laser_scan_info);
     map_scan->ranges.clear();
 
-    /*
-     * The angular progression of scanning depends on how the laser is mounted
-     * on the robot:
-     * a. On the turtlebot the laser faces upwards;
-     * b. On the rb1 the laser faces downwards
-     */
     int sgn = 0;
     if (laser_z_orientation_.compare("upwards") == 0)
       sgn = -1;
@@ -2659,14 +2285,6 @@ CBGL::scanMapPanoramic(
       ROS_ERROR("[%s] Please provide a valid value", PKG_NAME.c_str());
       ROS_ERROR("       for param laser_z_orientation");
     }
-
-    /*
-     * Iterate over all angles.
-     * Calculate range for every angle (calc_range returns range in pixels).
-     * The angles start counting negatively.
-     * For details see
-     * https://github.com/kctess5/range_libc/blob/deploy/docs/RangeLibcUsageandInformation.pdf
-     */
 
     if (scan_method.compare("ray_marching") == 0)
     {
@@ -2707,33 +2325,23 @@ CBGL::scanMapPanoramic(
 CBGL::siftThroughCAERPanoramic(
   const std::vector<geometry_msgs::Pose::Ptr>& init_hypotheses)
 {
-  /* All da_*init_hypotheses.size() hypotheses */
   std::vector<geometry_msgs::Pose::Ptr> all_hypotheses;
 
-  /* Compute all caers */
   std::vector<double> caers;
   std::vector<double> scan_map_times;
   sensor_msgs::LaserScan::Ptr sv_i;
   for (unsigned int i = 0; i < init_hypotheses.size(); i++)
   {
-    /* Compute the virtual scan from pose hypothesis i */
     sv_i = scanMapPanoramic(init_hypotheses[i], map_scan_method_);
 
-    /* This hypothesis' orientation */
     const double yaw_i = extractYawFromPose(*init_hypotheses[i]);
     double new_yaw_i = 0.0;
     tf::Quaternion q;
 
-    /* Extract only ranges */
     const std::vector<float> r_i = sv_i->ranges;
     const size_t num_rays = r_i.size();
 
 
-    /* Both operands were unsigned, so a cast shorter than the reduced scan
-     * wrapped this to an enormous value and the crop iterator built from it
-     * pointed far past the end of the rotated ranges. Subtracting as doubles
-     * cannot wrap, and a cast that really is shorter is refused below rather
-     * than cropped from nowhere. */
     if (num_rays < nrays_)
     {
       ROS_ERROR("[%s] A cast of %zu rays cannot serve a scan of %u; skipping "
@@ -2748,17 +2356,6 @@ CBGL::siftThroughCAERPanoramic(
     geometry_msgs::Pose::Ptr pose_ik;
     for (unsigned int k = 0; k < da_; k++)
     {
-      /* The shift for candidate k, rounded once from k rather than accumulated
-       * as k copies of a rounded step.
-       *
-       * This used to be k * round(num_rays / da_). Rounding first and
-       * multiplying afterwards carries the rounding error k times over, so the
-       * candidates no longer span the turn: at 360 rays and 32 orientations the
-       * step rounds to 11 samples and the last candidate sits at 341 degrees,
-       * leaving a 19 degree gap at the wrap round. A pose whose orientation
-       * falls in that gap has no candidate within 9.5 degrees of it, where an
-       * even spread would leave none further than 5.5 degrees away, and the
-       * refinement is asked to make up the difference. */
       const unsigned int shift = round(
         static_cast<double>(k) * num_rays / da_);
 
@@ -2768,91 +2365,31 @@ CBGL::siftThroughCAERPanoramic(
       std::vector<float>::const_iterator b = a + nrays_;
 
 
-      /* deez ranges */
       std::vector<float> r_ikf(a,b);
 
-      /* This is the pose from which r_ikf was captured */
       pose_ik = boost::make_shared<geometry_msgs::Pose>(*init_hypotheses[i]);
 
-      /* Orientation.
-       *
-       * The ranges above move by shift samples, a whole number of them, so the
-       * orientation those ranges were actually taken at is that many samples
-       * round the turn. This used to be computed from
-       * k and da_ alone, which is the angle k WOULD amount to if the shift
-       * divided the ray count exactly, and it seldom does: at 360 rays and 32
-       * orientations the ranges move 11 degrees a step while the label moved
-       * 11.25, and the label moved the opposite way besides, being subtracted
-       * from the drawn yaw rather than added to it. The two disagreed by a
-       * quarter of a degree a step and stood 7.75 degrees apart at the last of
-       * the 32 candidates.
-       *
-       * That matters because the label is where the refinement starts and the
-       * ranges are what the candidate was chosen by. A candidate whose label
-       * disagrees with its own ranges is refined from the wrong orientation. */
       new_yaw_i = yaw_i +
         2*M_PI * static_cast<double>(shift)/static_cast<double>(num_rays);
       wrapAngle(new_yaw_i);
       q.setRPY(0.0, 0.0, new_yaw_i); q.normalize();
       tf::quaternionTFToMsg(q, pose_ik->orientation);
 
-      /* The full hypothesis */
       all_hypotheses.push_back(pose_ik);
 
 
-      /* Compute CAER */
       double c = caer(latest_world_scan_->ranges, r_ikf);
       if (c > 0.0)
         caers.push_back(c);
       else  /* THIS IS NECESSARY */
         caers.push_back(std::numeric_limits<double>::max());
 
-      /* printf("%f\n", caers.back()); */
     }
   }
 
-  /*
-   * for (unsigned int i = 0; i < all_hypotheses.size(); i=i+da_)
-   * {
-   * ROS_INFO("(%f,%f,%f)",
-   * all_hypotheses[i]->position.x,
-   * all_hypotheses[i]->position.y,
-   * extractYawFromPose(*all_hypotheses[i]));
-   * }
-
-   * / * Publish ALL CAERS * /
-   * geometry_msgs::PoseArray pa2;
-   * pa2.header.stamp = ros::Time::now();
-   * std::vector<geometry_msgs::Pose> pv2;
-   * for (unsigned int i = 0; i < all_hypotheses.size(); i++)
-   * {
-   * pv2.push_back(*all_hypotheses[i]);
-   * pv2[i].position.x = caers[i];
-   * }
-   * pa2.poses = pv2;
-   * all_hypotheses_caer_publisher_.publish(pa2);
-
-
-   * / * Publish ALL hypotheses * /
-   * geometry_msgs::PoseArray pa1;
-   * pa1.header.stamp = ros::Time::now();
-   * std::vector<geometry_msgs::Pose> pv1;
-   * for (unsigned int i = 0; i < all_hypotheses.size(); i++)
-   * pv1.push_back(*all_hypotheses[i]);
-   * pa1.poses = pv1;
-   * all_hypotheses_publisher_.publish(pa1);
-   */
-
-  /* Partially sort caer indices: move the top_k_caers_ smallest to the front */
   std::vector<size_t> idx(caers.size());
   std::iota(idx.begin(), idx.end(), 0);
 
-  /* The middle iterator has to lie inside the range, and the loop below has to
-   * stop where the candidates do. Neither was true where the map offered fewer
-   * candidates than top_k_caers_ asked for, which a map with little free space
-   * does, and both the partial sort and the read that followed then went past
-   * the end of idx. Where fewer exist than were asked for, every one of them is
-   * a survivor and there is no top slice to move to the front. */
   const unsigned int kept =
     std::min(static_cast<size_t>(top_k_caers_), idx.size());
 
@@ -2863,7 +2400,6 @@ CBGL::siftThroughCAERPanoramic(
     [&caers](size_t i1,size_t i2) {return caers[i1] < caers[i2];});
 
 
-  /* The top p% of lowest caers in hypotheses */
   std::vector<geometry_msgs::Pose::Ptr> caer_best_particles;
   for (unsigned int i = 0; i < kept; i++)
     caer_best_particles.push_back(all_hypotheses[idx[i]]);
@@ -2893,17 +2429,10 @@ CBGL::startSignalService(
   pf_init_model(pf_hyp_, (pf_init_model_fn_t)CBGL::uniformPoseGenerator,
     (void *)map_hyp_);
 
-  /* The set of all newly-distributed hypotheses */
   pf_sample_set_t* set = pf_hyp_->sets + pf_hyp_->current_set;
 
   geometry_msgs::PoseArray::Ptr pose_cloud_msg =
     boost::make_shared<geometry_msgs::PoseArray>();
-  /* The wall clock here, and deliberately, where the four messages that carry
-   * an answer take the stamp of the scan they answer for. This one is not an
-   * answer: it is the set of hypotheses as they stand the moment the start
-   * signal arrives, and that signal may arrive before any scan has, since this
-   * service only requires a map. There is no scan to take a stamp from, and
-   * reaching for one would dereference nothing at all. */
   pose_cloud_msg->header.stamp = ros::Time::now();
   pose_cloud_msg->header.frame_id = fixed_frame_id_;
   pose_cloud_msg->poses.resize(set->sample_count);
@@ -2919,22 +2448,11 @@ CBGL::startSignalService(
     q.normalize();
     tf::quaternionTFToMsg(q, pose_cloud_msg->poses[i].orientation);
 
-    /*
-     * ROS_ERROR("(%f,%f)",
-     * pose_cloud_msg->poses[i].position.x,
-     * pose_cloud_msg->poses[i].position.y);
-     */
   }
 
-  /*
-   * Publish the cloud. This is not the full cloud considered by CBGL; it only
-   * features dl * area poses at this point. The next step here is to rotate
-   * all of them in 360 / da deg intervals in order to cover a whole cycle ...
-   */
   if (publish_pose_sets_)
     all_hypotheses_publisher_.publish(*pose_cloud_msg);
 
-  /* ... which is handled here. This used to be a callback and the name stuck. */
   poseCloudCallback(pose_cloud_msg);
 
   ROS_INFO("[%s] Global initialisation done!", PKG_NAME.c_str());
@@ -2953,10 +2471,6 @@ CBGL::uniformPoseGenerator(void* arg)
 {
   map_t* map = (map_t*)arg;
 
-  /* The draw runs over the map's whole extent, expressed as offsets from its
-   * centre along its own axes, and every draw is then carried out to world
-   * coordinates. Drawing in the map's own axes is what lets a map whose axes
-   * are turned against the world's be covered at all. */
   const double half_x = (map->size_x * map->scale)/2.0;
   const double half_y = (map->size_y * map->scale)/2.0;
 
@@ -2973,7 +2487,6 @@ CBGL::uniformPoseGenerator(void* arg)
       + map->origin_sin_yaw * offset_x + map->origin_cos_yaw * offset_y;
     p.v[2] = drand48() * 2*M_PI - M_PI;
 
-    /* Check that it's a free cell */
     int i,j;
     i = MAP_GXWX(map, p.v[0], p.v[1]);
     j = MAP_GYWY(map, p.v[0], p.v[1]);
@@ -3004,10 +2517,8 @@ CBGL::wrapAngle(double& angle)
 CBGL::wrapPoseOrientation(
   geometry_msgs::Pose::Ptr& pose)
 {
-  /* Extract yaw ... */
   double yaw = extractYawFromPose(*pose);
 
-  /* ... and wrap between [-π, π] */
   wrapAngle(yaw);
 
   tf::Quaternion q;
