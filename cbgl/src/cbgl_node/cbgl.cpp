@@ -1630,6 +1630,19 @@ CBGL::poseCloudCallback(
  * @brief
  * @return void
  */
+/**
+ * @details The per candidate result and its transform are set before the call
+ * that fills them rather than after. `handleInputPose` writes into neither
+ * where no refinement is selected, and a valid flag left as whatever the stack
+ * held then decided whether to apply a transform that was never set either.
+ * A refusal and the identity are what "nothing refined this" means, and they
+ * are what the two gates further down read. Setting `do_icp` and `do_fsm` both
+ * false is what `params_cbgl.yaml` has always said selects no refinement, and
+ * this is what makes that true.
+ * @remark Every field of the result is set, including the three the answer
+ * would arrive in, so that nothing later read is read from the stack whether
+ * or not this build ever reads it today.
+ */
 void CBGL::processPoseCloud()
 {
   ros::Time start = ros::Time::now();
@@ -1685,18 +1698,14 @@ void CBGL::processPoseCloud()
       caer_best_particles[i]->position.y,
       extractYawFromPose(*caer_best_particles[i]));
 
-    /* Both are set before the call rather than after it. handleInputPose
-     * writes into neither where no refinement is selected, and a valid flag
-     * left as whatever the stack held decided below whether to apply a
-     * transform that was never set either. A refusal and the identity are what
-     * "nothing refined this" means, and they are what the two gates below then
-     * read. Setting do_icp and do_fsm both false is what params_cbgl.yaml has
-     * always said selects no refinement, and this is what makes that true. */
     sm_result output;
     output.valid = 0;
     output.iterations = 0;
     output.nvalid = 0;
     output.error = 0.0;
+    output.x[0] = 0.0;
+    output.x[1] = 0.0;
+    output.x[2] = 0.0;
     output.cov_x_m = 0;
     output.dx_dy1_m = 0;
     output.dx_dy2_m = 0;
