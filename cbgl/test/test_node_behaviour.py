@@ -322,6 +322,34 @@ class TestNodeBehaviour(unittest.TestCase):
                 'a scan covering three quarters of a turn'
                 % (self.expected[2], yaw_of(pose.orientation)))
 
+        # The bound above is four cells, which is loose enough to pass while a
+        # narrower sensor is answered systematically worse than a panoramic
+        # one. It was: the refinement laid its rays out across a whole turn
+        # whatever the aperture, so at three quarters of one it spaced them a
+        # third too far apart and biased every heading by about half a degree,
+        # and this case passed throughout.
+        #
+        # The two answers come from the same measurement seen through two
+        # apertures, so they have to agree far more closely than either has to
+        # match the truth. Three tenths of a degree sits between the two states
+        # rather than at either: the fault put them 0.5 degrees apart and the
+        # correct spacing puts them 0.16 apart on this fixture, a quarter of a
+        # cell at the mean range it carries. A tenth of a degree was tried
+        # first and refuses the correct code, which is a bound chosen from a
+        # hope rather than from either measurement.
+        panoramic = self.answer().pose.pose
+        drift = wrap(yaw_of(pose.orientation) - yaw_of(panoramic.orientation))
+
+        self.assertLess(
+            abs(drift), math.radians(0.3),
+            'the narrower sensor answered %.4f radians where the panoramic one '
+            'answered %.4f from the same measurement, a difference of %.3f '
+            'degrees. The two are the same scan through two apertures and have '
+            'to agree: a difference that grows with the aperture is the '
+            'refinement laying its rays out at the wrong spacing.'
+            % (yaw_of(pose.orientation), yaw_of(panoramic.orientation),
+               math.degrees(drift)))
+
     def test_2_the_answer_is_stamped_from_the_scan_that_produced_it(self):
         stamp = self.answer().header.stamp
 

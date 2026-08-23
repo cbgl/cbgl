@@ -161,7 +161,7 @@ private:
  * going to give it.
  */
 LaserDataHandle laserDataOf(const std::span<const double> ranges,
-  const double range_min, const double range_max)
+  const double range_min, const double range_max, const double aperture)
 {
   const int num_rays = static_cast<int>(ranges.size());
 
@@ -204,7 +204,17 @@ LaserDataHandle laserDataOf(const std::span<const double> ranges,
     }
 
     ldp->cluster[i] = -1;
-    ldp->theta[i] = -M_PI + i * 2.0 * M_PI / num_rays;
+    /* The spacing the sensor really has, which is its aperture over its ray
+     * count, and not a whole turn over its ray count. Those are the same
+     * number only for a sensor that sees all the way round. For one covering
+     * three quarters of a turn they differ by a third, and laying its rays out
+     * a third too far apart distorts both scans the solver is given. The two
+     * are distorted alike, so the solver still converges and still reports
+     * success, and the transform it converges on is not the transform between
+     * the undistorted scans. Measured on the real map, that showed as a
+     * heading biased by 0.6 of a degree where a panoramic scan was biased by
+     * 0.1, and a median position error of 23 mm against 4 mm. */
+    ldp->theta[i] = -0.5 * aperture + i * aperture / num_rays;
   }
 
   ldp->min_theta = ldp->theta[0];
@@ -436,7 +446,8 @@ std::expected<IcpResult, IcpError> IcpRefiner::refine(
   if (std::cmp_greater(ranges.size(), kMostRays))
     return std::unexpected(IcpError::scan_too_long);
 
-  const LaserDataHandle measured = laserDataOf(ranges, range_min, range_max);
+  const LaserDataHandle measured =
+    laserDataOf(ranges, range_min, range_max, aperture);
 
   const std::span<const int> validity(measured->valid,
     static_cast<std::size_t>(measured->nrays));
@@ -458,7 +469,8 @@ std::expected<IcpResult, IcpError> IcpRefiner::refine(
 
   const std::span<const double> seen(cast.data() + prefix, ranges.size());
 
-  const LaserDataHandle reference = laserDataOf(seen, range_min, range_max);
+  const LaserDataHandle reference =
+    laserDataOf(seen, range_min, range_max, aperture);
 
   sm_params input = matcherInputOf(parameters_, range_min, range_max);
   input.laser_ref = reference.get();
