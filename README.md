@@ -535,10 +535,13 @@ What a **redistributed binary** carries is a different question, and the answer 
 | From | Through | Terms |
 | --- | --- | --- |
 | CGAL | `fsm_localisation` | GPL v3 |
+| FFTW | `fsm_localisation` | GPL v2 or later |
 | the ray casting inside `fsm_localisation` | `fsm_localisation` | Apache 2.0 |
 | `csm` | the `icp` refinement | LGPL v3 |
 
 The ROS 1 version also carried LGPL v2.1 and Apache 2.0 obligations from amcl's map and particle filter and from a vendored ray casting library. Both are gone from these sources along with the code that brought them.
+
+FFTW's terms allow version 3, so the two GPL rows combine to GPL v3 rather than conflicting. That is worth saying rather than leaving a reader to check it.
 
 **Adding `csm` costs a redistributor no new source obligation.** GPL v3 already applied through CGAL before this package gained an ICP refinement, and GPL v3 is stricter than LGPL v3 on that point: a redistributor who supplies the corresponding source of the whole work has already done more than LGPL v3's relinking clause asks. That is the reason the dependency was taken.
 
