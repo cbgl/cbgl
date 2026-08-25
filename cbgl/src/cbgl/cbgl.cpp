@@ -64,7 +64,7 @@ struct Refinement
  * sift is.
  */
 Refinement correctedPosesOf(std::span<const ScoredPose> survivors,
-  std::span<const double> scan, const double range_max,
+  std::span<const double> scan, const double range_max, const double aperture,
   const fsm_localisation::Corrector& corrector)
 {
   Refinement refinement;
@@ -73,7 +73,7 @@ Refinement correctedPosesOf(std::span<const ScoredPose> survivors,
   {
     const std::expected<fsm_localisation::CorrectionResult,
       fsm_localisation::CorrectionError> result =
-      corrector.correct(scan, survivor.pose, range_max);
+      corrector.correct(scan, survivor.pose, range_max, aperture);
 
     if (result.has_value())
       refinement.corrected.push_back(result->corrected);
@@ -541,7 +541,7 @@ std::expected<Result, Error> Localiser::localise(std::span<const double> ranges,
   const Refinement refinement = icp_refiner_.has_value()
     ? correctedPosesOf(
         scored, *reduced, range_min, range_max, aperture, *icp_refiner_)
-    : correctedPosesOf(scored, *reduced, range_max, corrector_);
+    : correctedPosesOf(scored, *reduced, range_max, aperture, corrector_);
 
   if (refinement.corrected.empty())
     return std::unexpected(Error{

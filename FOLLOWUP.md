@@ -47,10 +47,14 @@ the sensor could have seen. The rotation that yields a candidate is still over
 the whole turn, so what a candidate is labelled with does not depend on the
 aperture.
 
-The caveat is the refinement. The scan matcher matches a full turn against a
-full turn and has nothing to say about a fraction of one, so a narrower sensor
-wants `refinement_method: "icp"`, which does not discriminate. Nothing refuses
-the other combination and nothing measures it either.
+There used to be a caveat here saying the refinement did not follow, so a
+narrower sensor wanted `refinement_method: "icp"`, and that nothing measured
+the other combination. Nothing did, and when it finally was measured the
+caveat turned out to be describing a defect rather than a property. The scan
+matcher refinement was never told what the sensor covered, so it read the map
+over a whole turn and matched it against a fraction of one. That is repaired in
+`fsm_localisation`, whose corrector now takes the aperture as a required
+argument. Both refinements follow the sensor at any aperture it can cover.
 
 A scan whose first ray does not sit half its own span behind the sensor's
 heading, or which claims to span more than a turn, is still refused at the

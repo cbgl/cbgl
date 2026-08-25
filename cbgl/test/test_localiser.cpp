@@ -1289,7 +1289,7 @@ TEST(Localiser, AScanTheSeamHasNoBusinessRefusingIsRefusedByNeitherLayer)
     << "really produce.";
 
   const std::expected<fsm_localisation::CorrectionResult, CorrectionError>
-    matcher = corrector.correct(ranges, truth, kRangeMax);
+    matcher = corrector.correct(ranges, truth, kRangeMax, 2.0 * M_PI);
 
   const bool matcher_called_it_short = !matcher.has_value() &&
     matcher.error() == CorrectionError::scan_too_short;
@@ -2043,7 +2043,7 @@ TEST_P(ScanRefusalSeam, AScanRefusedHereIsRefusedByTheMatcherForTheSameThing)
     << "sent to look at the wrong thing.";
 
   const std::expected<fsm_localisation::CorrectionResult, CorrectionError>
-    matcher = corrector.correct(ranges, truth, kRangeMax);
+    matcher = corrector.correct(ranges, truth, kRangeMax, 2.0 * M_PI);
 
   ASSERT_FALSE(matcher.has_value())
     << "this library refuses the " << seam.label << " scan of " << seam.rays

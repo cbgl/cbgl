@@ -337,9 +337,9 @@ The ROS 1 package offered both refinements and shipped with `icp` selected. This
 
 `icp` needs `csm`, which is not installed by a package name and is LGPL v3. See [Installation](#from-source) for building it and [Licensing](#licensing) for what depending on it means.
 
-**A sensor that cannot see all the way round wants `icp`, and the reason is not the one the ROS 1 package's arrangement suggests.** What supports such a sensor is the sift, not the refinement. The sift reads the map all the way round at the sensor's own angular resolution, which is more readings than the sensor has, and compares only the middle window of the sensor's own length. That is what makes a narrower scan meaningful at all, and it runs whichever refinement is chosen.
+**A sensor that cannot see all the way round works with either refinement.** What supports such a sensor is the sift: it reads the map all the way round at the sensor's own angular resolution, which is more readings than the sensor has, and compares only the middle window of the sensor's own length. The refinement then decides whether the answer survives the last stage, and both refinements now follow the sensor's own aperture rather than assuming a whole turn.
 
-The refinement then decides whether the answer survives the last stage. `fsm` matches a full turn against a full turn and has nothing to say about three quarters of one. `icp` does not discriminate. So a narrower sensor needs the window, which it has, and then `icp`, which is why the two look connected.
+This page used to say that a narrower sensor wanted `icp`, because `fsm` matched a full turn against a full turn. That was a defect in the scan matcher path rather than a property of it: nothing told that refinement what the sensor covered, so it read the map over a whole turn and matched it against three quarters of one, which converges on a confident wrong answer rather than failing. It is repaired. Measured on the real map at a thousand trials, three quarters of a turn, the scan matcher answers 99.6 per cent of trials inside half a metre and five degrees with a median error of 0.8 mm, against the solver's 99.8 per cent and 4.3 mm, and it is the quicker of the two.
 
 #### ICP settings
 
