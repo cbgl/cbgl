@@ -76,11 +76,10 @@ cd cbgl/docker
 docker compose build
 ```
 
-The image runs a build, so the two arithmetic build options described below reach it as build arguments rather than as CMake arguments. Both packages are built in the one invocation, so all four arguments are set together for the same reason the source build sets all four:
+The image runs a build, so the two arithmetic build options described below reach it as build arguments rather than as CMake arguments. Both belong to `fsm_localisation` and this package follows whatever that package was built with, so there are two arguments rather than four:
 
 ```sh
 docker compose build \
-  --build-arg CBGL_EXACT_FP=ON --build-arg CBGL_DETERMINISTIC_FFT=ON \
   --build-arg FSM_LOCALISATION_EXACT_FP=ON \
   --build-arg FSM_LOCALISATION_DETERMINISTIC_FFT=ON
 ```
@@ -134,13 +133,14 @@ Every line of the `csm` recipe earns its place, so none of it is optional:
 
 If you skip the second patch, `colcon test` catches it: the refinement's own tests exercise the settings the ROS 1 package ships, which switch that path on.
 
-Two build options exist for comparing builds rather than for running a robot. Both cost speed and both default off. `CBGL_EXACT_FP` builds at `-O2 -fno-fast-math -ffp-contract=off` instead of `-Ofast`, so that two compilers agree. `CBGL_DETERMINISTIC_FFT` makes the matcher's transform plans chosen by heuristic rather than by timing, so that two runs agree. Set them on **both** packages in the same invocation, not on `cbgl` alone:
+Two build options exist for comparing builds rather than for running a robot. Both cost speed, both default off, and **both belong to `fsm_localisation` rather than to this package.** `FSM_LOCALISATION_EXACT_FP` builds at `-O2 -fno-fast-math -ffp-contract=off` instead of `-Ofast`, so that two compilers agree. `FSM_LOCALISATION_DETERMINISTIC_FFT` makes the matcher's transform plans chosen by heuristic rather than by timing, so that two runs agree.
 
 ```sh
 colcon build --packages-up-to cbgl --cmake-args \
-  -DCBGL_EXACT_FP=ON -DCBGL_DETERMINISTIC_FFT=ON \
   -DFSM_LOCALISATION_EXACT_FP=ON -DFSM_LOCALISATION_DETERMINISTIC_FFT=ON
 ```
+
+**This package carries no switch of its own, and that is deliberate.** The matcher is a header this package compiles for itself, and `fsm_localisation` compiled the same header when it was built. Two arithmetics over one header put two definitions of one inline function into a single process, and which of them survives linking is the linker's choice rather than anybody's intention. So `fsm_localisation` records what it was built with and this package reads it: where the two are built together the answer is the invocation above, and where `fsm_localisation` arrives already built, from a package manager, its arithmetic is settled and nothing here can revisit it. A `fsm_localisation` too old to carry that record is refused at configure time rather than built against.
 
 ### As a dependency of your own package
 

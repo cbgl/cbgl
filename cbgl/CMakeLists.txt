@@ -9,17 +9,34 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-option(CBGL_EXACT_FP "Forbid floating point reassociation and contraction" OFF)
-option(CBGL_DETERMINISTIC_FFT "Select FFTW plans by heuristic, not by timing" OFF)
-
-if(CBGL_EXACT_FP)
-  add_compile_options(-O2 -fno-fast-math -ffp-contract=off)
-else()
-  add_compile_options(-Ofast -fno-finite-math-only)
-endif()
-
 find_package(ament_cmake REQUIRED)
 find_package(fsm_localisation REQUIRED)
+
+# The arithmetic is fsm_localisation's to choose and this package follows it.
+#
+# It is not a choice this package can make. The matcher is a header this
+# package compiles for itself, and fsm_localisation compiled the same header
+# when it was built. Two arithmetics over one header put two definitions of one
+# inline function into a single process, and which survives linking is the
+# linker's choice rather than anybody's intention. Where fsm_localisation
+# arrives already built, from a package manager, its arithmetic is settled and
+# nothing here can revisit it; where the two are built together, whoever asked
+# for that build has already said what they want. Either way the answer is read
+# rather than made, so this package offers no switch of its own.
+#
+# The transform planning choice needs nothing here at all. It travels as a
+# compile definition on the exported library target and reaches this package's
+# own translation units through the link.
+if(NOT DEFINED FSM_LOCALISATION_BUILT_COMPILE_OPTIONS)
+  message(FATAL_ERROR
+    "the fsm_localisation found here does not record the arithmetic it was "
+    "built with, so this package cannot match it. Every released "
+    "fsm_localisation records it. A tree that does not is older than the "
+    "first release and has to be updated before this package is built "
+    "against it.")
+endif()
+
+add_compile_options(${FSM_LOCALISATION_BUILT_COMPILE_OPTIONS})
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
@@ -65,10 +82,6 @@ target_include_directories(cbgl_core PUBLIC
 target_link_libraries(cbgl_core PUBLIC
   cbgl_icp_refinement
   fsm_localisation::fsm_localisation_core)
-
-if(CBGL_DETERMINISTIC_FFT)
-  target_compile_definitions(cbgl_core PUBLIC FSM_LOCALISATION_FFTW_ESTIMATE)
-endif()
 
 add_library(cbgl_grid SHARED
   src/cbgl/free_space.cpp)

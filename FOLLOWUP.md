@@ -107,9 +107,13 @@ The sift is split by hypothesis index, one thread per contiguous chunk, each wri
 
 ## Build, packaging and linting
 
-### The deterministic transform option cannot bind the matcher from this package alone
+### The arithmetic options were this package's to set and no longer are. Closed
 
-`CBGL_DETERMINISTIC_FFT` makes transform plans chosen by heuristic rather than by timing, so that two runs agree. The flag is read by a header-only file, and `fsm_localisation`'s own library was compiled with `fsm_localisation`'s own setting, so which definition survives linking is the linker's choice. Setting the option on `cbgl` alone is therefore not enough: both packages must be built with their respective options in the same invocation. The readme says so where it documents the options. This is inherited from how `fsm_localisation` arranges it and was out of scope to change here.
+This entry described a hazard and it is now repaired rather than documented. What it said: the two options were read by a header-only file that `fsm_localisation` had already compiled with its own settings, so which definition survived linking was the linker's choice, and setting them on this package alone was not enough.
+
+That was a live hazard while both packages were only ever built from source together. It becomes a worse one the moment `fsm_localisation` arrives already built, from a package manager, because then its arithmetic is settled and nothing here can revisit it, while an option here would still appear to offer the choice.
+
+So this package has no such option any more. `fsm_localisation` records what it was built with, and this package reads that record and follows it, refusing at configure time a `fsm_localisation` too old to carry it. The two options keep their `fsm_localisation` names and now govern both packages from one place.
 
 ### The exported CMake extras file earns nothing today
 

@@ -1,8 +1,6 @@
 FROM ros:lyrical-ros-base
 
 SHELL ["/bin/bash", "-o", "pipefail", "-o", "errexit", "-c"]
-ARG CBGL_EXACT_FP=OFF
-ARG CBGL_DETERMINISTIC_FFT=OFF
 ARG FSM_LOCALISATION_EXACT_FP=OFF
 ARG FSM_LOCALISATION_DETERMINISTIC_FFT=OFF
 
@@ -168,16 +166,16 @@ RUN sudo apt-get -y update                                                  && \
       --skip-keys "libfftw3 csm"                                           && \
     sudo rm -rf /var/lib/apt/lists/*
 
-# Both packages are built in one invocation because the deterministic
-# transform switch lives in a header both packages include; setting it
-# for cbgl alone would still leave fsm_localisation built against the
-# default.
+# Both switches belong to fsm_localisation and cbgl follows whatever that
+# package was built with. The matcher is a header cbgl compiles for itself,
+# so two arithmetics over one header would put two definitions of one inline
+# function into a single process. cbgl reads the choice out of what
+# fsm_localisation installs rather than offering a switch of its own, which
+# is why only two arguments reach this build rather than four.
 RUN source /opt/ros/lyrical/setup.bash                                      && \
     cd /home/${USER}/ros2_ws                                                && \
     colcon build --packages-up-to cbgl                                        \
       --cmake-args                                                             \
-        -DCBGL_EXACT_FP=${CBGL_EXACT_FP}                                       \
-        -DCBGL_DETERMINISTIC_FFT=${CBGL_DETERMINISTIC_FFT}                     \
         -DFSM_LOCALISATION_EXACT_FP=${FSM_LOCALISATION_EXACT_FP}               \
         -DFSM_LOCALISATION_DETERMINISTIC_FFT=${FSM_LOCALISATION_DETERMINISTIC_FFT}
 

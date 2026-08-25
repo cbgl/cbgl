@@ -117,9 +117,14 @@ Forthcoming
   sensor's heading and the measured scan is read the same way, so a legal scan
   beginning elsewhere would otherwise be answered with a pose rotated by half a
   turn, in silence.
-* Adds ``CBGL_EXACT_FP`` and ``CBGL_DETERMINISTIC_FFT``, mirroring
-  ``fsm_localisation``'s own options by name and by effect. Both default off and
-  both exist for comparing builds rather than for running a robot.
+* Carries no arithmetic build option of its own. The two that govern the
+  arithmetic and the transform planning belong to ``fsm_localisation`` and this
+  package follows whatever that package was built with. The matcher is a header
+  this package compiles for itself, so two arithmetics over one header would put
+  two definitions of one inline function into a single process, and which
+  survived linking would be the linker's choice. ``fsm_localisation`` records
+  what it was built with and this package reads it, refusing at configure time a
+  ``fsm_localisation`` too old to carry that record.
 * Becomes MIT. Dropping amcl's map and particle filter removes the LGPL v2.1
   obligation and dropping the vendored casting removes the Apache 2.0 obligation,
   so ``COPYING.LGPL`` and ``LICENSE.APACHE`` are gone and ``LICENSE.MIT`` becomes
