@@ -63,12 +63,6 @@ limitation: such a scan is perfectly legal, and reading it as though it agreed
 with this convention would return a confident answer rotated by whatever the
 two differ by.
 
-### Interpolated rays reach the ICP solver as ordinary readings
-
-Where `size_scan` forces a subsample, the scan is interpolated across its gaps before any survivor is refined. The conversion the ICP path uses cannot tell a filled ray from a measured one: a filled ray is finite, above the near bound, below the far bound and not zero, which is every test the conversion applies. So a filled ray becomes an ordinary correspondence and carries the same weight as a measured one.
-
-The same is recorded above for the sift and the scan matcher. Whether it matters is not established either way here, and no measurement has been made of it.
-
 ## The node
 
 ### The map's own frame is warned about rather than checked
@@ -123,7 +117,7 @@ So this package has no such option any more. `fsm_localisation` records what it 
 
 `cmake/cbgl-extras.cmake` guards the creation of an imported FFTW target, and that target already exists by the time the file runs, because `fsm_localisation`'s own extras file runs first through the exported dependency. The file is kept because the layout names it and because it makes the requirement a stated one rather than an accident of include order, and it costs a consumer nothing.
 
-**It can no longer go.** It is now the only thing that creates the imported target for `csm`, which `cbgl_core` links, so every consumer that calls `find_package(cbgl)` needs it. It also carries the refusal that stops a statically built `csm` being linked, which is a licensing requirement rather than a convenience. The paragraph above described a file that earned nothing; that is no longer true of it.
+**It stopped earning nothing and then went back to earning nothing.** While the point to line refinement was carried, this file was the only thing that created the imported target for the matcher that refinement needed, and it carried the refusal that stopped a static link to an LGPL library. That refinement is gone, so both of those went with it, and the paragraph above is true of the file again. It is still kept, for the reasons that paragraph gives.
 
 ### A configuration notice from CGAL cannot be removed
 

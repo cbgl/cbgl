@@ -115,31 +115,6 @@ Pose compose(const Pose& a, const Pose& b)
     FSM::Utils::wrapAngle(a.t + b.t)};
 }
 
-/**
- * @brief The whole count a parameter carries.
- * @details Every count this node reads is held unsigned, and a negative integer
- * cast to unsigned is an enormous positive one that no validator downstream can
- * tell from a deliberate setting. So a negative value is refused here, in the
- * same words as every other refusal, rather than turned into a run nobody asked
- * for.
- */
-int wholeOf(const rclcpp::Node& node, const std::string& name)
-{
-  const std::int64_t value = node.get_parameter(name).as_int();
-
-  if (value < std::numeric_limits<int>::min() ||
-    value > std::numeric_limits<int>::max())
-  {
-    const std::string problem = std::format(
-      "{} must lie between {} and {}, got {}", name,
-      std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), value);
-    RCLCPP_FATAL(node.get_logger(), "Refusing to start: %s", problem.c_str());
-    throw std::invalid_argument(problem);
-  }
-
-  return static_cast<int>(value);
-}
-
 unsigned int countOf(const rclcpp::Node& node, const std::string& name)
 {
   const std::int64_t value = node.get_parameter(name).as_int();
@@ -256,49 +231,19 @@ std::string sentenceOf(const fsm_localisation::CorrectionError error)
       return "a survivor from which every cast ray leaves the map";
     case fsm_localisation::CorrectionError::recovery_budget_exhausted:
       return "a match that spent its whole recovery budget without settling";
+    case fsm_localisation::CorrectionError::aperture_not_a_sensor:
+      return "an aperture no sensor can cover, which the node's own gate on "
+        "the scan should have refused before a survivor was ever refined";
   }
 
   return "a refusal the matcher did not name";
 }
 
 /**
- * @brief What the iterative closest point refinement's refusal of one survivor
- * amounts to, as a phrase a count can be put in front of.
- * @remark The solver's own refusal is one of the six and the other five are
- * settled before it is reached, so a phrase here names what was wrong with the
- * scan rather than restating that a match failed.
- */
-std::string sentenceOf(const IcpError error)
-{
-  switch (error)
-  {
-    case IcpError::cast_length_mismatch:
-      return "a cast from the map that came back at some length other than "
-        "the one it was asked for";
-    case IcpError::matching_failed:
-      return "a match the solver could hold too few correspondences for";
-    case IcpError::scan_empty:
-      return "a scan carrying no range at all";
-    case IcpError::scan_entirely_invalid:
-      return "a scan carrying no usable range";
-    case IcpError::scan_too_long:
-      return "a scan carrying more ranges than the solver will match";
-    case IcpError::scan_too_short:
-      return "a scan carrying fewer ranges than the solver will match";
-  }
-
-  return "a refusal the refinement did not name";
-}
-
-/**
  * @brief Why the library produced no pose, in words a caller can act on.
- * @details The two reasons that carry per survivor counts say how many
- * survivors went each way, since which way the refinement failed is what tells
- * a badly bounded search from a map the sensor cannot see anything in.
- * @remark Both counts are walked, though one refinement runs per localisation
- * and only one of the two can carry anything. Which of them it is belongs to
- * the settings and not to this sentence, and asking which was configured to
- * decide which to read would be a second place for that answer to live.
+ * @details The reason that carries per survivor counts says how many survivors
+ * went each way, since how the refinement failed is what tells a badly bounded
+ * search from a map the sensor cannot see anything in.
  */
 std::string sentenceOf(const Error& error)
 {
@@ -314,15 +259,13 @@ std::string sentenceOf(const Error& error)
     };
 
   count(error.refusals);
-  count(error.icp_refusals);
 
   const std::string counts = counted.empty() ? "" : ": " + counted;
 
   switch (error.reason)
   {
     case Error::Reason::every_survivor_refused:
-      return std::format("the {} refused every survivor of the sift",
-        error.icp_refusals.empty() ? "matcher" : "solver") + counts;
+      return "the matcher refused every survivor of the sift" + counts;
     case Error::Reason::map_has_no_free_space:
       return "the map carries no free cell, so there is nowhere to place a "
         "hypothesis";
@@ -419,29 +362,16 @@ Interface::Interface(const rclcpp::NodeOptions& options)
   const std::string refinement =
     get_parameter("refinement_method").as_string();
 
-  if (refinement != "fsm" && refinement != "icp" && refinement != "none")
+  if (refinement != "fsm" && refinement != "none")
   {
     const std::string problem = std::format(
-      "refinement_method must be \"fsm\", \"icp\" or \"none\", got \"{}\"",
+      "refinement_method must be \"fsm\" or \"none\", got \"{}\"",
       refinement);
     RCLCPP_FATAL(get_logger(), "Refusing to start: %s", problem.c_str());
     throw std::invalid_argument(problem);
   }
 
   parameters_.refine = refinement != "none";
-
-  if (refinement == "icp")
-  {
-    declareIcpParameters();
-    parameters_.icp = readIcpParameters();
-
-    if (const std::string problem = validate(*parameters_.icp);
-      !problem.empty())
-    {
-      RCLCPP_FATAL(get_logger(), "Refusing to start: %s", problem.c_str());
-      throw std::invalid_argument(problem);
-    }
-  }
 
   const std::string reliability =
     get_parameter("scan_qos_reliability").as_string();
@@ -647,71 +577,11 @@ Interface::Interface(const rclcpp::NodeOptions& options)
   RCLCPP_INFO(get_logger(), "Refining by %s",
     !parameters_.refine
       ? "nothing: the sift's own best candidate is published as it stands"
-      : parameters_.icp.has_value()
-        ? "the point to line solver, csm"
-        : "the panoramic scan matcher, fsm_localisation");
+      : "the panoramic scan matcher, fsm_localisation");
 
   RCLCPP_INFO(get_logger(),
     "Standing by. To localise issue ros2 service call "
     "%s/global_localisation std_srvs/srv/Trigger", get_name());
-}
-
-/**
- * @details Each setting carries the name the ROS 1 build reads it by and the
- * value `IcpParameters` falls back to where it is not given one, taken from a
- * default constructed set rather than written out a second time here, so that
- * the two cannot drift apart. What that build's own settings file sets is
- * another matter: those are a tuning of this solver rather than its defaults,
- * and a run meaning to reproduce them sets them.
- * @remark These reach a solver that judges none of them, so
- * `cbgl::validate(const IcpParameters&)` is called on what comes back before a
- * localiser is built from it.
- */
-void Interface::declareIcpParameters()
-{
-  const IcpParameters defaults;
-
-  declare_parameter("clustering_threshold", defaults.clustering_threshold,
-    readOnly());
-  declare_parameter("debug_verify_tricks", defaults.debug_verify_tricks,
-    readOnly());
-  declare_parameter("do_alpha_test", defaults.do_alpha_test, readOnly());
-  declare_parameter("do_alpha_test_thresholdDeg",
-    defaults.do_alpha_test_thresholdDeg, readOnly());
-  declare_parameter("do_compute_covariance", defaults.do_compute_covariance,
-    readOnly());
-  declare_parameter("do_visibility_test", defaults.do_visibility_test,
-    readOnly());
-  declare_parameter("epsilon_theta", defaults.epsilon_theta, readOnly());
-  declare_parameter("epsilon_xy", defaults.epsilon_xy, readOnly());
-  declare_parameter("max_angular_correction_deg",
-    defaults.max_angular_correction_deg, readOnly());
-  declare_parameter("max_correspondence_dist",
-    defaults.max_correspondence_dist, readOnly());
-  declare_parameter("max_iterations", defaults.max_iterations, readOnly());
-  declare_parameter("max_linear_correction", defaults.max_linear_correction,
-    readOnly());
-  declare_parameter("orientation_neighbourhood",
-    defaults.orientation_neighbourhood, readOnly());
-  declare_parameter("outliers_adaptive_mult", defaults.outliers_adaptive_mult,
-    readOnly());
-  declare_parameter("outliers_adaptive_order",
-    defaults.outliers_adaptive_order, readOnly());
-  declare_parameter("outliers_maxPerc", defaults.outliers_maxPerc, readOnly());
-  declare_parameter("outliers_remove_doubles",
-    defaults.outliers_remove_doubles, readOnly());
-  declare_parameter("restart", defaults.restart, readOnly());
-  declare_parameter("restart_dt", defaults.restart_dt, readOnly());
-  declare_parameter("restart_dtheta", defaults.restart_dtheta, readOnly());
-  declare_parameter("restart_threshold_mean_error",
-    defaults.restart_threshold_mean_error, readOnly());
-  declare_parameter("sigma", defaults.sigma, readOnly());
-  declare_parameter("use_corr_tricks", defaults.use_corr_tricks, readOnly());
-  declare_parameter("use_ml_weights", defaults.use_ml_weights, readOnly());
-  declare_parameter("use_point_to_line_distance",
-    defaults.use_point_to_line_distance, readOnly());
-  declare_parameter("use_sigma_weights", defaults.use_sigma_weights,
-    readOnly());
 }
 
 void Interface::declareParameters()
@@ -890,7 +760,7 @@ void Interface::localiseOnce(std_srvs::srv::Trigger::Response& outcome)
     static_cast<double>(scan->ranges.size()) * scan->angle_increment;
 
   const std::expected<Result, Error> result = localiser->localise(
-    ranges, scan->range_min, scan->range_max, hypotheses, aperture);
+    ranges, scan->range_max, hypotheses, aperture);
 
   if (!result.has_value())
   {
@@ -925,9 +795,6 @@ void Interface::localiseOnce(std_srvs::srv::Trigger::Response& outcome)
   unsigned int refused = 0U;
 
   for (const auto& [reason, count] : result->refusals)
-    refused += count;
-
-  for (const auto& [reason, count] : result->icp_refusals)
     refused += count;
 
   outcome.success = true;
@@ -1121,59 +988,6 @@ void Interface::publishTransform(const Pose& robot, const Pose& odom_in_robot,
   message.transform.rotation.w = quaternion.w();
 
   transform_broadcaster_->sendTransform(message);
-}
-
-/**
- * @details Read into the very struct the declarations took their defaults
- * from, under the same names, so that a setting reaches the solver by one
- * route and is named the same at both ends of it.
- */
-IcpParameters Interface::readIcpParameters()
-{
-  IcpParameters parameters;
-
-  parameters.clustering_threshold =
-    get_parameter("clustering_threshold").as_double();
-  parameters.debug_verify_tricks =
-    get_parameter("debug_verify_tricks").as_bool();
-  parameters.do_alpha_test = get_parameter("do_alpha_test").as_bool();
-  parameters.do_alpha_test_thresholdDeg =
-    get_parameter("do_alpha_test_thresholdDeg").as_double();
-  parameters.do_compute_covariance =
-    get_parameter("do_compute_covariance").as_bool();
-  parameters.do_visibility_test =
-    get_parameter("do_visibility_test").as_bool();
-  parameters.epsilon_theta = get_parameter("epsilon_theta").as_double();
-  parameters.epsilon_xy = get_parameter("epsilon_xy").as_double();
-  parameters.max_angular_correction_deg =
-    get_parameter("max_angular_correction_deg").as_double();
-  parameters.max_correspondence_dist =
-    get_parameter("max_correspondence_dist").as_double();
-  parameters.max_iterations = wholeOf(*this, "max_iterations");
-  parameters.max_linear_correction =
-    get_parameter("max_linear_correction").as_double();
-  parameters.orientation_neighbourhood =
-    wholeOf(*this, "orientation_neighbourhood");
-  parameters.outliers_adaptive_mult =
-    get_parameter("outliers_adaptive_mult").as_double();
-  parameters.outliers_adaptive_order =
-    get_parameter("outliers_adaptive_order").as_double();
-  parameters.outliers_maxPerc = get_parameter("outliers_maxPerc").as_double();
-  parameters.outliers_remove_doubles =
-    get_parameter("outliers_remove_doubles").as_bool();
-  parameters.restart = get_parameter("restart").as_bool();
-  parameters.restart_dt = get_parameter("restart_dt").as_double();
-  parameters.restart_dtheta = get_parameter("restart_dtheta").as_double();
-  parameters.restart_threshold_mean_error =
-    get_parameter("restart_threshold_mean_error").as_double();
-  parameters.sigma = get_parameter("sigma").as_double();
-  parameters.use_corr_tricks = get_parameter("use_corr_tricks").as_bool();
-  parameters.use_ml_weights = get_parameter("use_ml_weights").as_bool();
-  parameters.use_point_to_line_distance =
-    get_parameter("use_point_to_line_distance").as_bool();
-  parameters.use_sigma_weights = get_parameter("use_sigma_weights").as_bool();
-
-  return parameters;
 }
 
 /**

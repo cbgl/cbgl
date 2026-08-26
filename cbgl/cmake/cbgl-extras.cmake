@@ -24,21 +24,6 @@ if(NOT TARGET PkgConfig::FFTW3)
   pkg_check_modules(FFTW3 REQUIRED IMPORTED_TARGET fftw3)
 endif()
 
-if(NOT TARGET PkgConfig::CSM)
-  pkg_check_modules(CSM REQUIRED IMPORTED_TARGET csm)
-
-  # Refused for the reason cbgl's own CMakeLists.txt gives at length: csm is
-  # LGPL v3, it is linked dynamically to satisfy that licence, and a csm built
-  # without BUILD_SHARED_LIBS resolves to an archive with nothing said.
-  if(CSM_LINK_LIBRARIES MATCHES "\\.a(;|$)")
-    message(FATAL_ERROR
-      "csm resolved to a static archive (${CSM_LINK_LIBRARIES}). cbgl links "
-      "csm dynamically because csm is LGPL v3 and a static link does not "
-      "satisfy that licence's relinking requirement. Rebuild csm with "
-      "-DBUILD_SHARED_LIBS=ON.")
-  endif()
-endif()
-
 if(NOT TARGET yaml-cpp::yaml-cpp)
   find_package(yaml-cpp REQUIRED)
 endif()

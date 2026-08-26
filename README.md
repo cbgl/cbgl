@@ -34,7 +34,6 @@ Table of Contents
   * [Map](#map)
   * [Dispersal and sift](#dispersal-and-sift)
   * [Refinement](#refinement)
-    * [ICP settings](#icp-settings)
   * [Matcher](#matcher)
   * [Covariance](#covariance)
   * [Node behaviour](#node-behaviour)
@@ -92,46 +91,20 @@ docker compose run --rm cbgl bash
 
 ### From source
 
-`fsm_localisation` must be in the same workspace. Everything else is declared in the manifests and `rosdep` fetches it, bar two keys described below.
-
-`csm` comes first, because `cbgl` will not configure without it. That is Andrea Censi's canonical scan matcher, which the ICP refinement uses. It has no `rosdep` rule and no release for any ROS 2 distribution, so it is built from source and installed to the system. Clone it outside the workspace: it carries a manifest of its own and `colcon` would otherwise try to build it as a workspace package.
+`fsm_localisation` must be in the same workspace. Everything else is declared in the manifests and `rosdep` fetches it, bar one key described below.
 
 ```sh
 mkdir -p ~/ros2_ws/src && cd ~/ros2_ws/src
 git clone git@github.com:cbgl/cbgl.git
 git clone git@github.com:fourier-scan-matcher/fsm-localisation.git
 
-cd ~
-git clone https://github.com/AndreaCensi/csm.git
-cd csm
-git checkout 04c4a31072e8690bd0ff14de50be20c5b6b43e66
-for p in ~/ros2_ws/src/cbgl/docker/csm_*.patch; do
-  patch -p1 --forward --batch --fuzz=0 < "${p}"
-done
-cmake -S . -B build -DBUILD_SHARED_LIBS=ON -DCMAKE_CXX_FLAGS=-O2 \
-  -DCMAKE_INSTALL_PREFIX=/usr/local
-cmake --build build
-sudo cmake --install build
-sudo rm -f /usr/local/lib/libcsm-static.a
-sudo ldconfig
-
 cd ~/ros2_ws
 sudo apt install libfftw3-dev
-rosdep install --from-paths src --ignore-src -r -y --skip-keys "libfftw3 csm"
+rosdep install --from-paths src --ignore-src -r -y --skip-keys libfftw3
 colcon build --packages-up-to cbgl
 ```
 
-`rosdep` needs `libfftw3` skipped because the key resolves through the upstream rules to a package Ubuntu dropped in favour of one per floating point precision, so `libfftw3-dev` is installed by name instead. It needs `csm` skipped because there is no rule for that key at all, and the step above has already installed it.
-
-Every line of the `csm` recipe earns its place, so none of it is optional:
-
-* **The commit is pinned** because the three patches are written against the sources exactly as that commit stands. The branch has not moved since August 2022, so treat the patches as permanent rather than as something upstream will take off your hands.
-* **The three patches** are carried in `docker/`, each with its reasoning at its head. The first is the only one `csm`'s own build refuses to proceed without. The second corrects a write one entry past the end of a buffer inside `csm`, on the code path `do_alpha_test` reaches; leave it out and the refinement corrupts memory the moment that setting is switched on, which the settings the ROS 1 package ships do. The third makes `csm`'s own `pkg-config` file name the shared library rather than the static one.
-* **`BUILD_SHARED_LIBS=ON` is a licensing requirement, not a preference.** `csm` is LGPL v3 and `cbgl` links it dynamically to satisfy that licence's relinking requirement. Without the switch `csm` builds an archive and `-lcsm` resolves to it silently. `cbgl` refuses to configure against a static `csm` rather than let that pass, but being told after the fact is not the point.
-* **The optimisation flag is given on its own** rather than by asking for a release build. `csm`'s build file names no default build type, so without it the whole library compiles unoptimised. A release build would fix that and also define `NDEBUG`, which disarms the assertions guarding `csm`'s own fixed-size pools.
-* **The static archive is removed** after the install because nothing should reach it, deliberately or otherwise.
-
-If you skip the second patch, `colcon test` catches it: the refinement's own tests exercise the settings the ROS 1 package ships, which switch that path on.
+`rosdep` needs `libfftw3` skipped because the key resolves through the upstream rules to a package Ubuntu dropped in favour of one per floating point precision, so `libfftw3-dev` is installed by name instead.
 
 Two build options exist for comparing builds rather than for running a robot. Both cost speed, both default off, and **both belong to `fsm_localisation` rather than to this package.** `FSM_LOCALISATION_EXACT_FP` builds at `-O2 -fno-fast-math -ffp-contract=off` instead of `-Ofast`, so that two compilers agree. `FSM_LOCALISATION_DETERMINISTIC_FFT` makes the matcher's transform plans chosen by heuristic rather than by timing, so that two runs agree.
 
@@ -151,10 +124,9 @@ Five libraries are exported. Link the narrowest one that does what you need.
 | `cbgl::cbgl_core` | nothing of ROS, not even a message type | the algorithm itself, given a grid and a scan |
 | `cbgl::cbgl_grid` | occupancy grid messages, no `rclcpp` | turning a map message into the free space the search draws from |
 | `cbgl::cbgl_map_file` | occupancy grid messages and `yaml-cpp`, no `rclcpp` | reading a map description file and its PGM into a map message |
-| `cbgl::cbgl_icp_refinement` | the canonical scan matcher and no ROS | refining one pose against a map by ICP |
 | `cbgl::cbgl_interface` | everything ROS | embedding the node in a process of your own |
 
-`cbgl_core` links `cbgl_icp_refinement`, so `csm` is a load-time dependency of **every** target above whatever `refinement_method` is set to. See [Licensing](#licensing).
+Every target above reaches CGAL and FFTW through `fsm_localisation`. See [Licensing](#licensing).
 
 ```cmake
 find_package(cbgl REQUIRED)
@@ -320,69 +292,15 @@ Every survivor of the sift is refined against the map. Two algorithms can do it 
 
 | Parameter | Meaning | Default | Shipped |
 | --- | --- | --- | --- |
-| `refinement_method` | which algorithm refines a survivor: `fsm`, `icp` or `none` | `fsm` | `fsm` |
+| `refinement_method` | whether a survivor is refined: `fsm` or `none` | `fsm` | `fsm` |
 
-`fsm` is the panoramic scan matcher of `fsm_localisation`, which reads the map afresh at every pose it tries. `icp` is Andrea Censi's canonical scan matcher, point to line, which reads the map **once**, at the survivor's own pose, and then matches the measurement onto that one frozen reading. That difference is the whole of what separates them: one consults the map throughout, the other consults it once.
+`fsm` is the panoramic scan matcher of `fsm_localisation`, which reads the map afresh at every pose it tries, at whatever aperture the sensor covers. `none` publishes the sift's own best candidate as it stands, which is quantised to what the sift can express and is the cheapest and least accurate configuration. Any other value is refused at start-up, naming the setting and the value.
 
-`none` refines nothing and publishes the sift's own best candidate as it stands. Nothing casts a second time, so it is by far the cheapest configuration and by far the least accurate: the answer is quantised to what the sift can express, one of `da` orientations at the position of a drawn free cell. Measured on the real map at two hundred trials:
-
-| Refinement | Within 5 cm | Within 50 cm | Median | Heading | Time |
-| --- | --- | --- | --- | --- | --- |
-| `fsm` | 100% | 100% | 0.9 mm | 0.02 deg | 167 ms |
-| `none` | 7% | 94.5% | 150 mm | 1.71 deg | 96 ms |
-
-So `none` puts the robot in the right part of the building and no more. It is what a caller wants who refines elsewhere, or who needs a room rather than a pose. Giving solver settings alongside it is refused rather than one of the two quietly winning.
-
-The ROS 1 package offered both refinements and shipped with `icp` selected. This ships with `fsm`, so a configuration that says nothing gets what this package has always done. Any other value is refused at start-up, naming the setting and the value.
-
-`icp` needs `csm`, which is not installed by a package name and is LGPL v3. See [Installation](#from-source) for building it and [Licensing](#licensing) for what depending on it means.
+The ROS 1 package offered a second refinement, Andrea Censi's canonical scan matcher, and shipped with it selected. **That path is not carried here.** It was, and it was removed once the scan matcher had been measured against it: at three quarters of a turn, a thousand trials, the scan matcher answers 99.6 per cent of trials inside half a metre and five degrees with a median error of 0.8 mm against the solver's 99.8 per cent and 4.3 mm, and it is the quicker of the two. Keeping it cost an LGPL v3 dependency with no ROS 2 release, three patches against a commit upstream has not moved since 2022, and one of those patches correcting a write past the end of a buffer. Nothing it did was worth that.
 
 **A sensor that cannot see all the way round works with either refinement.** What supports such a sensor is the sift: it reads the map all the way round at the sensor's own angular resolution, which is more readings than the sensor has, and compares only the middle window of the sensor's own length. The refinement then decides whether the answer survives the last stage, and both refinements now follow the sensor's own aperture rather than assuming a whole turn.
 
-This page used to say that a narrower sensor wanted `icp`, because `fsm` matched a full turn against a full turn. That was a defect in the scan matcher path rather than a property of it: nothing told that refinement what the sensor covered, so it read the map over a whole turn and matched it against three quarters of one, which converges on a confident wrong answer rather than failing. It is repaired. Measured on the real map at a thousand trials, three quarters of a turn, the scan matcher answers 99.6 per cent of trials inside half a metre and five degrees with a median error of 0.8 mm, against the solver's 99.8 per cent and 4.3 mm, and it is the quicker of the two.
-
-#### ICP settings
-
-Declared only when `refinement_method` is `icp`, and refused when out of range, naming the setting and the value. Every name and every default is the ROS 1 package's own.
-
-**The Shipped column here means something different from every other table on this page.** Elsewhere it is what `config/params.yaml` sets. This package's own settings file sets none of these, so the column is what the ROS 1 package's `params_csm.yaml` carries, printed in the type this package declares.
-
-**That file does not transfer as it stands, and the types are why.** It writes ten of these as `0` or `1` where they are declared here as booleans: `debug_verify_tricks`, `do_alpha_test`, `do_compute_covariance`, `do_visibility_test`, `outliers_remove_doubles`, `restart`, `use_corr_tricks`, `use_ml_weights`, `use_point_to_line_distance` and `use_sigma_weights`. Write those as `true` and `false`. For the same reason a decimal setting must be written as one: `do_alpha_test_thresholdDeg: 5.0` rather than `5`, exactly as `dl` must be written `15.0`. A whole number against a decimal declaration is refused by the parameter machinery in its own words rather than in this package's, so the sentence you get names neither the value nor what to do about it.
-
-| Parameter | Default | Shipped |
-| --- | --- | --- |
-| `clustering_threshold` | `0.25` | `1.025` |
-| `debug_verify_tricks` | `false` | `false` |
-| `do_alpha_test` | `false` | `true` |
-| `do_alpha_test_thresholdDeg` | `20.0` | `5.0` |
-| `do_compute_covariance` | `false` | `false` |
-| `do_visibility_test` | `false` | `false` |
-| `epsilon_theta` | `0.000001` | `0.00001` |
-| `epsilon_xy` | `0.000001` | `0.00001` |
-| `max_angular_correction_deg` | `45.0` | `180.0` |
-| `max_correspondence_dist` | `0.3` | `1.0` |
-| `max_iterations` | `10` | `100` |
-| `max_linear_correction` | `0.50` | `10.0` |
-| `orientation_neighbourhood` | `20` | `20` |
-| `outliers_adaptive_mult` | `2.0` | `2.0` |
-| `outliers_adaptive_order` | `0.7` | `1.0` |
-| `outliers_maxPerc` | `0.90` | `1.0` |
-| `outliers_remove_doubles` | `true` | `false` |
-| `restart` | `false` | `false` |
-| `restart_dt` | `1.0` | `0.01` |
-| `restart_dtheta` | `0.1` | `0.01` |
-| `restart_threshold_mean_error` | `0.01` | `0.0001` |
-| `sigma` | `0.010` | `0.01` |
-| `use_corr_tricks` | `true` | `false` |
-| `use_ml_weights` | `false` | `false` |
-| `use_point_to_line_distance` | `true` | `true` |
-| `use_sigma_weights` | `false` | `false` |
-
-Measured on the real map at two hundred trials a side, the two refinements cost 167 ms and 232 ms at a full turn and 188 ms at three quarters of one, against a node that reports its own work rather than the round trip. Accuracy is level: every trial of both inside five centimetres at a full turn.
-
-The ROS 1 package reads three more, `gpm_theta_bin_size_deg`, `gpm_extend_range_deg` and `gpm_interval`. They belong to a different algorithm in the same library, one this package does not call, and the variant built here has no such settings at all. They are not carried and setting them does nothing.
-
-`use_sigma_weights` is refused when true. It weights each correspondence by a per-reading uncertainty that nothing fills in, so switching it on cannot work and the refusal says so rather than letting the solver complain once per reading.
+This page used to say that a narrower sensor wanted the other refinement, because the scan matcher matched a full turn against a full turn. That was a defect in the scan matcher path rather than a property of it: nothing told that refinement what the sensor covered, so it read the map over a whole turn and matched it against three quarters of one, which converges on a confident wrong answer rather than failing. It is repaired, and repairing it is what left the second refinement with nothing to do.
 
 ### Matcher
 
@@ -506,7 +424,7 @@ The repairs to the tip were the split caster constructor, a conversion buffer si
 
 | Setting | Why |
 | --- | --- |
-| `do_icp`, `do_fsm` | replaced by `refinement_method`, one setting with one value, where two booleans could say both or neither. **The ROS 1 package shipped `do_icp: true`**, so anyone running its shipped configuration was refining by ICP; that path exists here and is selected by `refinement_method: "icp"`, but this package ships with the scan matcher instead |
+| `do_icp`, `do_fsm` | replaced by `refinement_method`, one setting with one value, where two booleans could say both or neither. **The ROS 1 package shipped `do_icp: true`**, so anyone running its shipped configuration was refining by the point to line solver. That path is not carried here at all: the scan matcher was measured against it and matches or beats it at every aperture, so the dependency it needed was dropped rather than ported |
 | `laser_z_orientation` | it existed to compensate for reading the grid's rows in reverse. The replacement map handles the origin's translation, its rotation and its row order itself. The ROS 1 build now handles a rotated origin too, so this setting is a leftover there rather than a difference in what the two can do |
 | the `vanilla` value of `map_scan_method` | it selected a second ray tracer that is gone. The three surviving names are `ray_marching`, `bresenham` and `cddt`, and any other name is refused at start-up. `vanilla` was also what ROS 1 fell back to when the setting was absent, so a configuration that never named one has to name one now |
 | `do_undersample_scan`, `undersample_rate` | `size_scan` does this, and does it by resampling rather than by dropping every nth ray |
@@ -530,31 +448,19 @@ The repairs to the tip were the split caster constructor, a conversion buffer si
 
 `cbgl`'s own sources are MIT. See [LICENSE](LICENSE). That is unaffected by everything below: MIT code may link a library under any of these terms.
 
-What a **redistributed binary** carries is a different question, and the answer is that it carries obligations from three directions at once.
+What a **redistributed binary** carries is a different question, and the answer is that it carries obligations from two directions, both of them through `fsm_localisation`.
 
 | From | Through | Terms |
 | --- | --- | --- |
 | CGAL | `fsm_localisation` | GPL v3 |
 | FFTW | `fsm_localisation` | GPL v2 or later |
 | the ray casting inside `fsm_localisation` | `fsm_localisation` | Apache 2.0 |
-| `csm` | the `icp` refinement | LGPL v3 |
+
+FFTW's terms allow version 3, so the two GPL rows combine to GPL v3 rather than conflicting. That is worth saying rather than leaving a reader to check it. The GPL v3 text travels with the work as that licence asks: [COPYING](COPYING), installed into `share/cbgl` so that it reaches a built tree and not only these sources.
 
 The ROS 1 version also carried LGPL v2.1 and Apache 2.0 obligations from amcl's map and particle filter and from a vendored ray casting library. Both are gone from these sources along with the code that brought them.
 
-FFTW's terms allow version 3, so the two GPL rows combine to GPL v3 rather than conflicting. That is worth saying rather than leaving a reader to check it.
-
-**Adding `csm` costs a redistributor no new source obligation.** GPL v3 already applied through CGAL before this package gained an ICP refinement, and GPL v3 is stricter than LGPL v3 on that point: a redistributor who supplies the corresponding source of the whole work has already done more than LGPL v3's relinking clause asks. That is the reason the dependency was taken.
-
-**It does add two paperwork obligations, and those are not subsumed.**
-
-* A notice with each copy of the combined work saying that `csm` is used and that `csm` and its use are covered by the LGPL. This section is that notice.
-* The LGPL v3 text alongside the work. GPL v3 already required its own text to travel, so that half was owed already; the LGPL text was not. Both are here: [COPYING](COPYING) for the GPL v3 and [COPYING.LESSER](COPYING.LESSER) for the LGPL v3. The package carries its own copies of all three and installs them into `share/cbgl`, so they travel with a built tree rather than only with these sources. Both images additionally carry `csm`'s own copy at `/usr/local/share/licenses/csm/`.
-
-**`csm` is linked dynamically, and that is a requirement rather than a preference.** LGPL v3's relinking condition is met by dynamic linking and is awkward otherwise. The build refuses to configure against a statically built `csm` rather than let a static link happen quietly.
-
-**`csm` is carried modified.** Three patches are applied, listed under [Installation](#from-source) and kept in `docker/` with their reasoning. What a redistributor must be able to supply is therefore the pinned upstream commit **and those patches**, not upstream alone.
-
-**One consequence worth stating plainly.** Anybody who later removes the CGAL dependency to shed GPL v3 will find that the LGPL v3 obligation does not go with it. It becomes the binding constraint at that point rather than a detail underneath a stricter one.
+**This version briefly carried an LGPL v3 obligation as well, through Andrea Censi's canonical scan matcher, and no longer does.** That refinement was removed once it had been measured against the scan matcher, which matches or beats it at every aperture. `COPYING.LESSER` went with it. Anyone comparing against a state of this repository that still names it should read [Refinement](#refinement) for why it went.
 
 This is a reading of the licences and not legal advice. If a binary is ever redistributed commercially it wants a real review by somebody qualified to give one.
 

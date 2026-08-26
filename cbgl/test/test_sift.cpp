@@ -94,6 +94,8 @@ const unsigned int kColumns = 64U;
 const unsigned int kRows = 48U;
 const double kResolution = 0.05;
 
+const double kFullTurn = 2.0 * M_PI;
+
 const unsigned int kPillarFirstColumn = 44U;
 const unsigned int kPillarLastColumn = 47U;
 const unsigned int kPillarFirstRow = 20U;
@@ -263,18 +265,6 @@ double rangeMax()
   return 2.0 * std::hypot(kColumns * kResolution, kRows * kResolution);
 }
 
-/**
- * @brief The minimum range the grid's own casts report from, none of them
- * reporting anything shorter than nought.
- * @details Handed to every localisation below and read by none of them. It
- * reaches the iterative closest point refinement and nothing else, and every
- * case here refines with the matcher.
- */
-double rangeMin()
-{
-  return 0.0;
-}
-
 bool someCandidateCarries(const std::vector<Ranked>& ranked,
   const ScoredPose& survivor)
 {
@@ -328,7 +318,7 @@ TEST(Sift, ACandidateThatMetNothingIsRankedBehindEveryCandidateThatScored)
     freeSpaceOfTheRoom(*map));
 
   const std::expected<Result, Error> result =
-    localiser.localise(measured, rangeMin(), rangeMax(), hypotheses);
+    localiser.localise(measured, rangeMax(), hypotheses, kFullTurn);
 
   ASSERT_TRUE(result.has_value());
   ASSERT_EQ(result->survivors.size(), kTopK);
@@ -359,7 +349,7 @@ TEST(Sift, EveryCandidateSurvivesWhereTopKAsksForMoreThanExist)
     freeSpaceOfTheRoom(*map));
 
   const std::expected<Result, Error> result =
-    localiser.localise(measured, rangeMin(), rangeMax(), hypotheses);
+    localiser.localise(measured, rangeMax(), hypotheses, kFullTurn);
 
   ASSERT_TRUE(result.has_value());
 
@@ -396,7 +386,7 @@ TEST(Sift, TheRankingDoesNotDependOnTheNumberOfThreads)
       freeSpaceOfTheRoom(*map));
 
     const std::expected<Result, Error> result =
-      localiser.localise(measured, rangeMin(), rangeMax(), hypotheses);
+      localiser.localise(measured, rangeMax(), hypotheses, kFullTurn);
 
     ASSERT_TRUE(result.has_value())
       << "the search refused a run at " << threads << " threads that it "
@@ -465,7 +455,7 @@ TEST(Sift, TheSurvivorsAreTheCheapestCandidatesInRankingOrder)
     freeSpaceOfTheRoom(*map));
 
   const std::expected<Result, Error> result =
-    localiser.localise(measured, rangeMin(), rangeMax(), hypotheses);
+    localiser.localise(measured, rangeMax(), hypotheses, kFullTurn);
 
   ASSERT_TRUE(result.has_value());
 
@@ -533,7 +523,7 @@ TEST(Sift, TiedCandidatesAreNeitherLostNorDuplicated)
     freeSpaceOfTheRoom(*map));
 
   const std::expected<Result, Error> result =
-    localiser.localise(measured, rangeMin(), rangeMax(), hypotheses);
+    localiser.localise(measured, rangeMax(), hypotheses, kFullTurn);
 
   ASSERT_TRUE(result.has_value());
 

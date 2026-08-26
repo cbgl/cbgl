@@ -4,6 +4,32 @@ Changelog for package cbgl
 
 Forthcoming
 -----------
+* Carries one refinement rather than two. The ROS 1 package shipped Andrea
+  Censi's canonical scan matcher selected, and this port carried it as an option
+  so that a run here could be compared against results published from that
+  build. It is removed. The comparison was made, at a thousand trials per
+  configuration on a real map: at three quarters of a turn the panoramic scan
+  matcher answers 99.6 per cent of trials inside half a metre and five degrees
+  with a median error of 0.75 mm, against the solver's 99.8 per cent and 4.32
+  mm, and it is the quicker of the two. At a full turn the scan matcher was
+  already ahead. Keeping the solver cost an LGPL v3 dependency with no ROS 2
+  release for any distribution, three patches against a commit upstream has not
+  moved since 2022, and one of those patches correcting a write past the end of
+  a buffer inside it.
+* ``refinement_method`` takes ``fsm`` or ``none``. The twenty six settings the
+  solver read are gone with it, as is ``COPYING.LESSER``: the LGPL v3
+  obligation left with the dependency that brought it.
+* ``size_scan`` ships ``0``, every ray the scan carries, rather than ``360``. A
+  sensor covering three quarters of a turn carries 270 rays and was refused as
+  too short, by a message that named the ray count and never the aperture. The
+  aperture was always read from the scan; the ray count was not, and shipping
+  the value that needs no deriving is what makes such a sensor work with nothing
+  set.
+* ``Localiser::localise`` no longer takes the scan's minimum range. It reached
+  the solver alone and reaches nothing now. Its aperture argument carries no
+  default either, for the reason the aperture repair records: a default of a
+  whole turn is what lets a caller with a narrower sensor say nothing and be
+  answered wrongly.
 * Carried from ROS 1 Kinetic and C++11 to ROS 2 Lyrical and C++23. The published
   Kinetic package is preserved unchanged on the ``kinetic-devel`` branch. This
   version is not a drop-in replacement. The readme lists every changed name and
@@ -24,8 +50,8 @@ Forthcoming
 * The refinement is the matcher only. The ICP path is gone, and with it ``csm``,
   GSL and the egsl bindings. The Kinetic package shipped ``do_icp: true``, so a
   configuration carried across from it was refining by the path that has gone.
-  The consequence is that a sensor which does not see all the way round is no
-  longer supported, which the readme and the follow-up record both state.
+  A sensor that does not see all the way round is supported all the same: the
+  entry above records what that took and what it is worth.
 * Unlike the Kinetic version, the refinement casts into the map at every pose it
   tries rather than matching each survivor against one scan manufactured at that
   survivor's own pose. This is the largest behavioural difference in the port.

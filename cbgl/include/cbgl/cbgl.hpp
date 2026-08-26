@@ -33,7 +33,6 @@
 
 #include <fsm_localisation/fsm_localisation.hpp>
 
-#include "cbgl/icp_refinement.hpp"
 
 namespace cbgl
 {
@@ -82,25 +81,12 @@ struct FreeSpace
  * one struct carries them and one validator refuses them. The occupancy
  * threshold a map is built at and the name of the caster it is built with are
  * among them, since the matcher already carries both.
- * @remark `icp` is what chooses the refinement. Settings present refine every
- * survivor by iterative closest point and settings absent refine it by the
- * matcher, so the choice and the settings that go with it are one field and
- * cannot contradict each other the way a pair of switches could. Absent is the
- * default, and a host that says nothing refines as this package always has.
- * @remark `validate` below does not judge `icp`, though it judges `matcher`.
- * `validate(const IcpParameters&)` judges it, and a host that fills the field
- * calls that itself before it builds a localiser, so that a setting the solver
- * cannot use is refused at start up by name and by value rather than
- * complained about on the error stream once for every reading of every
- * candidate.
  */
 struct Parameters
 {
   unsigned int da{32};
 
   double dl{15.0};
-
-  std::optional<IcpParameters> icp;
 
   /**
    * @brief Whether a survivor is refined at all.
@@ -109,8 +95,6 @@ struct Parameters
    * 11.25 degrees apart at the shipped 32, at the position of a drawn free
    * cell. It is the cheapest configuration and the least accurate, and it is
    * what a caller wants who refines elsewhere or only needs a room.
-   * @remark `icp` is ignored where this is false, and a settings set carrying
-   * both is refused rather than silently preferring one.
    */
   bool refine{true};
 
@@ -152,11 +136,6 @@ struct ScoredPose
  * survivors the matcher refused, counted by the reason it gave. The number that
  * survived the sift is `survivors.size()`, which is smaller than `top_k_caers`
  * asked for wherever the map offered fewer candidates than that.
- * @remark `icp_refusals` is the same count for the other refinement. One
- * refinement runs per localisation, so at most one of the two maps is ever
- * filled, and they are two maps rather than one because the two refinements
- * refuse for reasons that do not correspond. A count under one heading is not
- * the same fact under the other and is not put there.
  */
 struct Result
 {
@@ -167,8 +146,6 @@ struct Result
   std::size_t num_candidates{0};
 
   std::vector<ScoredPose> survivors;
-
-  std::map<IcpError, unsigned int> icp_refusals;
 
   std::map<fsm_localisation::CorrectionError, unsigned int> refusals;
 };
@@ -183,9 +160,6 @@ struct Result
  * survivors before scoring the rest, and is empty for the remaining reasons.
  * It carries the count per reason the matcher gave, so that a host can say
  * which way the refinement went wrong rather than only that it did.
- * @remark `icp_refusals` carries the same count for the other refinement,
- * under its own reasons and for the same two cases. At most one of the two is
- * ever filled, one refinement running per localisation.
  */
 struct Error
 {
@@ -226,8 +200,6 @@ struct Error
   };
 
   Reason reason{Reason::map_has_no_free_space};
-
-  std::map<IcpError, unsigned int> icp_refusals;
 
   std::map<fsm_localisation::CorrectionError, unsigned int> refusals;
 };
@@ -319,28 +291,27 @@ public:
   /**
    * @brief Localise from a hypothesis set of the caller's own.
    * @param ranges the scan as the sensor reported it, unfilled and unreduced.
-   * @param range_min the scan's own minimum range, under which a reading is
-   * not a distance. It reaches the iterative closest point refinement, which
-   * marks a reading under it unusable, and it reaches nothing else: the sift,
-   * the matcher and the selection each judge a reading by the matcher's own
-   * test of it, which knows no lower bound. So a localisation that refines
-   * with the matcher gives the same answer whatever this is.
    * @param range_max the scan's own maximum range, which is what a ray meeting
-   * nothing reports. The map has never seen either bound, so both are given
-   * per localisation rather than held.
-   * @param aperture how much of a turn the scan covers, in radians. A whole
-   * turn is the default. A narrower sensor is served by casting the whole turn
-   * at the sensor's own angular resolution and comparing only the middle
-   * window of that cast. The rotation that yields a candidate is still over
-   * the whole turn, so what a candidate is labelled with does not change.
+   * nothing reports. The map has never seen it, so it is given per
+   * localisation rather than held.
+   * @param aperture how much of a turn the scan covers, in radians. A narrower
+   * sensor is served by casting the whole turn at the sensor's own angular
+   * resolution and comparing only the middle window of that cast. The rotation
+   * that yields a candidate is still over the whole turn, so what a candidate
+   * is labelled with does not change.
+   * @remark This carries no default, deliberately. A default of a whole turn
+   * would let a caller with a narrower sensor say nothing and be answered
+   * confidently and wrongly. That failure has happened once in this family
+   * already, one layer down, and a required parameter turns it into a compile
+   * error instead.
    * @remark Handing the set in rather than drawing it is what lets a test start
    * from a hypothesis set whose answer is known, and what lets two builds be
    * compared on everything downstream of the draw.
    */
   std::expected<Result, Error> localise(std::span<const double> ranges,
-    double range_min, double range_max,
+    double range_max,
     std::span<const Pose> hypotheses,
-    double aperture = 2.0 * M_PI) const;
+    double aperture) const;
 
   /**
    * @brief Localise from a hypothesis set of this localiser's own drawing.
@@ -348,20 +319,12 @@ public:
    * the difference between the two.
    */
   std::expected<Result, Error> localise(std::span<const double> ranges,
-    double range_min, double range_max,
-    double aperture = 2.0 * M_PI) const;
+    double range_max,
+    double aperture) const;
 
 private:
   const fsm_localisation::Corrector corrector_;
   const FreeSpace free_space_;
-
-  /**
-   * @brief The other refinement, where the settings asked for it, and nothing
-   * where they did not.
-   * @remark Held rather than pointed at, so that a localisation that refines
-   * with the matcher reaches no allocation and no indirection this adds.
-   */
-  std::optional<IcpRefiner> icp_refiner_;
 
   const std::shared_ptr<const FSM::GridReference> map_;
   const Parameters parameters_;

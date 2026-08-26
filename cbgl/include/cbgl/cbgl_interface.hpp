@@ -66,16 +66,7 @@ public:
   explicit Interface(const rclcpp::NodeOptions& options = rclcpp::NodeOptions());
 
 private:
-  /**
-   * @brief Declare the settings of the iterative closest point refinement.
-   * @remark Called only where that refinement is the one selected, which is
-   * why it is not part of `declareParameters` below. A node refining with the
-   * matcher would otherwise offer a couple of dozen settings nothing it does
-   * will ever read, and a value given for one of them would be accepted and
-   * would change nothing.
-   */
-  void declareIcpParameters();
-
+  
   void declareParameters();
 
   /**
@@ -121,14 +112,7 @@ private:
   void publishTransform(const Pose& robot, const Pose& odom_in_robot,
     const rclcpp::Time& stamp);
 
-  /**
-   * @brief The settings of the iterative closest point refinement, as that
-   * refinement takes them.
-   * @remark Only ever called where `declareIcpParameters` has run, every
-   * setting it reads being one that function declared.
-   */
-  IcpParameters readIcpParameters();
-
+  
   Parameters readParameters();
 
   geometry_msgs::msg::Pose retypePose(const Pose& pose) const;

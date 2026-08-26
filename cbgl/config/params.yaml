@@ -167,28 +167,19 @@
     # --------------------------------------------------------------------------
     # Refinement
     # --------------------------------------------------------------------------
-    # Which algorithm turns a survivor of the sift into an answer: "fsm" or
-    # "icp". One of the two is built, not both. Any other name stops the node
-    # coming up, and the refusal names the value it was given.
+    # Whether a survivor of the sift is refined into an answer: "fsm" or
+    # "none". Any other name stops the node coming up, and the refusal names
+    # the value it was given.
     #
     # "fsm" is the scan matching this package ships and is what every figure
     # published for this port was measured with. It consults the map
-    # throughout, casting afresh at each pose it tries, and it works only with
-    # a panoramic sensor.
+    # throughout, casting afresh at each pose it tries, at whatever aperture
+    # the sensor covers.
     #
-    # "icp" is iterative closest point, which is what the ROS 1 package shipped
-    # as its own default. It casts once, where the survivor stands, and then
-    # walks the measurement onto that one frozen cast. It is kept so that a run
-    # here can be compared against results published from that build.
-    #
-    # The solver "icp" uses brings its own settings, each carrying the name the
-    # ROS 1 build reads it by. They are declared only while "icp" is selected,
-    # so ros2 param list shows them on a node configured this way and on no
-    # other, and a value given for one of them on an "fsm" node is ignored
-    # rather than obeyed. Each falls back to what the ROS 1 code falls back to,
-    # which is not what that build's own settings file sets, so a run meaning
-    # to reproduce that file sets those values here. A value the solver cannot
-    # use is refused at start up, naming the setting and the value.
+    # "none" publishes the sift's own best candidate as it stands. That answer
+    # is quantised to what the sift can express, so it is the cheapest
+    # configuration and the least accurate. It is what a caller wants who
+    # refines elsewhere or only needs a room.
     refinement_method: "fsm"
 
     # --------------------------------------------------------------------------
@@ -198,17 +189,22 @@
     # They are handed through to fsm_localisation and are refused by that
     # package's own validator.
     #
-    # Where refinement_method is "icp", size_scan and ray_search still apply,
-    # both of them settling the one reduced scan every stage of a run works
-    # from, and the rest of this section changes nothing, no refinement of that
-    # run being the matcher's.
-    #
     # How many rays a scan is reduced to, once, before the sift. The same
     # reduced scan is what the sift, the refinement and the selection all work
-    # from, and the cast from the map is taken at the same length. 0 uses every
-    # ray the scan carries. A scan carrying fewer rays than this is refused.
-    # Execution time rises faster than the ray count does.
-    size_scan: 360
+    # from, and the cast from the map is taken at the same length.
+    #
+    # 0, shipped, uses every ray the scan carries, so a sensor of any ray count
+    # and any aperture works with nothing set. This used to ship 360, a whole
+    # turn's worth, and a sensor covering three quarters of one carries 270 and
+    # was refused as too short. The refusal named the ray count and never the
+    # aperture, so the setting to change was not the one a reader would look
+    # for. Nothing derives it, so shipping the value that needs no deriving is
+    # what makes a narrower sensor work out of the box.
+    #
+    # Any other value reduces every scan to that many rays and refuses a scan
+    # carrying fewer. Execution time rises faster than the ray count does, so
+    # this is the setting to reach for when an answer takes too long.
+    size_scan: 0
 
     # Base angular oversampling, and the maximum it may reach. Larger values buy
     # accuracy with execution time.

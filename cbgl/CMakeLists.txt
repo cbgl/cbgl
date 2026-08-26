@@ -47,27 +47,6 @@ find_package(tf2_ros REQUIRED)
 find_package(yaml-cpp REQUIRED)
 find_package(PkgConfig REQUIRED)
 
-pkg_check_modules(CSM REQUIRED IMPORTED_TARGET csm)
-
-# csm is LGPL v3 and is linked dynamically, which is what satisfies that
-# licence's relinking requirement. Nothing about the lookup above guarantees
-# that. csm's own build file declares its library with no type, so a csm built
-# without BUILD_SHARED_LIBS produces an archive, and the lookup resolves to
-# that archive with nothing said by anything. What comes out links, runs,
-# passes every test here, and quietly puts whoever redistributes it in the
-# position choosing this variant was meant to avoid. Reading a linker command
-# is the only way to notice after the fact, so it is refused here instead.
-# The same refusal stands in cmake/cbgl-extras.cmake, which is what a package
-# depending on this one resolves csm through.
-if(CSM_LINK_LIBRARIES MATCHES "\\.a(;|$)")
-  message(FATAL_ERROR
-    "csm resolved to a static archive (${CSM_LINK_LIBRARIES}). cbgl links csm "
-    "dynamically because csm is LGPL v3 and a static link does not satisfy "
-    "that licence's relinking requirement. Rebuild csm with "
-    "-DBUILD_SHARED_LIBS=ON. The installation section of cbgl's README carries "
-    "the whole recipe, including three patches csm needs.")
-endif()
-
 add_library(cbgl_core SHARED
   src/cbgl/cbgl.cpp)
 
@@ -75,12 +54,7 @@ target_include_directories(cbgl_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
 
-# cbgl_core refines a survivor by one of two algorithms and the second of them
-# is cbgl_icp_refinement, so csm travels with the core rather than only with
-# whoever asked for that refinement. csm is LGPL v3 and the note above says what
-# that costs; it now costs it of everything that links the core.
 target_link_libraries(cbgl_core PUBLIC
-  cbgl_icp_refinement
   fsm_localisation::fsm_localisation_core)
 
 add_library(cbgl_grid SHARED
@@ -89,17 +63,6 @@ add_library(cbgl_grid SHARED
 target_link_libraries(cbgl_grid PUBLIC
   cbgl_core
   fsm_localisation::fsm_localisation_grid)
-
-add_library(cbgl_icp_refinement SHARED
-  src/cbgl/icp_refinement.cpp)
-
-target_include_directories(cbgl_icp_refinement PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>)
-
-target_link_libraries(cbgl_icp_refinement
-  PUBLIC fsm_localisation::fsm_localisation_core
-  PRIVATE PkgConfig::CSM)
 
 add_library(cbgl_map_file SHARED
   src/cbgl/map_file.cpp)
@@ -141,27 +104,14 @@ if(BUILD_TESTING)
 
   find_package(ament_cmake_gtest REQUIRED)
 
-  # The refinement is compiled into this object library rather than linked in
-  # as the shared one. The shared one carries the package's default fast
-  # arithmetic, so a test that asks two builds to agree bit for bit would
-  # otherwise have one translation unit in the middle of it where the compiler
-  # may reassociate and contract: the scan conversion, the settings copy and the
-  # composition of the solver's answer onto the estimate. The solver underneath
-  # is a separate library built once and not by these options, so that one file
-  # is the whole of the gap and compiling it here closes it.
-  # It is a source of this library rather than a second object library because
-  # the objects of an object library reach an executable only where that
-  # executable links it directly, and what the tests link is this one.
   add_library(cbgl_core_exact OBJECT
-    src/cbgl/cbgl.cpp
-    src/cbgl/icp_refinement.cpp)
+    src/cbgl/cbgl.cpp)
 
   target_include_directories(cbgl_core_exact PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
   target_link_libraries(cbgl_core_exact
-    PUBLIC fsm_localisation::fsm_localisation_core
-    PRIVATE PkgConfig::CSM)
+    PUBLIC fsm_localisation::fsm_localisation_core)
 
   target_compile_options(cbgl_core_exact PUBLIC
     -O2 -fno-fast-math -ffp-contract=off)
@@ -184,10 +134,6 @@ if(BUILD_TESTING)
 
   ament_add_gtest(test_cbgl_free_space
     test/test_free_space.cpp)
-
-  ament_add_gtest(test_cbgl_icp_refinement
-    test/test_icp_refinement.cpp)
-  target_link_libraries(test_cbgl_icp_refinement cbgl_icp_refinement)
 
   ament_add_gtest(test_cbgl_localiser
     test/test_localiser.cpp
@@ -266,7 +212,6 @@ endif()
 install(TARGETS
   cbgl_core
   cbgl_grid
-  cbgl_icp_refinement
   cbgl_interface
   cbgl_map_file
   EXPORT export_cbgl
@@ -285,10 +230,10 @@ install(DIRECTORY launch config
   DESTINATION share/${PROJECT_NAME})
 
 # The licence texts are installed rather than left in the repository alone.
-# What a redistributor ships is this tree, not the sources, and LGPL v3 asks
-# for its own text to travel with the work. csm reaches every exported target
-# through cbgl_core, so the obligation reaches every one of them too.
-install(FILES LICENSE COPYING COPYING.LESSER
+# What a redistributor ships is this tree, not the sources, and GPL v3 asks for
+# its own text to travel with the work. CGAL reaches every exported target
+# through fsm_localisation, so the obligation reaches every one of them too.
+install(FILES LICENSE COPYING
   DESTINATION share/${PROJECT_NAME})
 
 ament_export_targets(export_cbgl HAS_LIBRARY_TARGET)

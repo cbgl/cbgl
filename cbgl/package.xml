@@ -20,7 +20,6 @@
   <depend>std_srvs</depend>
   <depend>tf2</depend>
   <depend>tf2_ros</depend>
-  <depend>csm</depend>
   <depend>libfftw3</depend>
   <depend>yaml-cpp</depend>
   <buildtool_depend>pkg-config</buildtool_depend>

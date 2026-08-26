@@ -42,16 +42,10 @@ namespace
  * @brief What refining a whole set of survivors amounts to: the corrected pose
  * of every survivor the refinement accepted, and how many it refused, counted
  * by the reason it gave.
- * @details Two counts rather than one because the two refinements refuse for
- * reasons that do not correspond and neither reason set is the other written
- * differently. One refinement runs per localisation, so at most one of the two
- * is ever filled.
  */
 struct Refinement
 {
   std::vector<Pose> corrected;
-
-  std::map<IcpError, unsigned int> icp_refusals;
 
   std::map<fsm_localisation::CorrectionError, unsigned int> refusals;
 };
@@ -79,43 +73,6 @@ Refinement correctedPosesOf(std::span<const ScoredPose> survivors,
       refinement.corrected.push_back(result->corrected);
     else
       refinement.refusals[result.error()]++;
-  }
-
-  return refinement;
-}
-
-/**
- * @brief The corrected pose of every survivor the iterative closest point
- * refinement accepted, and how many it refused, by reason.
- * @details Serial as well, and not for the reason the overload above is. That
- * one is serial because splitting it would buy nothing. This one is serial
- * because it cannot be split at all: the solver underneath keeps its context
- * stack, the counters that go with it and every matrix it has allocated in
- * process globals and guards none of it, so two refinements running at once
- * can be handed each other's matrices. `IcpRefiner`'s own header says so, of
- * any two calls anywhere in the process and not only of two on one refiner.
- * @remark What the refinement reports beyond the corrected pose, its error and
- * its cycle count, is dropped here. It says nothing on its own and means
- * something only against the same figures from another candidate of the same
- * scan, and the selection that follows ranks the corrected poses by the same
- * metric the sift ranked them by rather than by anything a refinement said
- * about itself.
- */
-Refinement correctedPosesOf(std::span<const ScoredPose> survivors,
-  std::span<const double> scan, const double range_min, const double range_max,
-  const double aperture, const IcpRefiner& refiner)
-{
-  Refinement refinement;
-
-  for (const ScoredPose& survivor : survivors)
-  {
-    const std::expected<IcpResult, IcpError> result =
-      refiner.refine(scan, survivor.pose, range_min, range_max, aperture);
-
-    if (result.has_value())
-      refinement.corrected.push_back(result->corrected);
-    else
-      refinement.icp_refusals[result.error()]++;
   }
 
   return refinement;
@@ -195,7 +152,7 @@ std::expected<Result, Error> unrefinedResult(std::vector<ScoredPose> scored,
   if (std::isinf(scored.front().score))
     return std::unexpected(Error{
       .reason = Error::Reason::no_scorable_pose,
-      .icp_refusals = {}, .refusals = {}});
+      .refusals = {}});
 
   const Pose winner = scored.front().pose;
 
@@ -205,7 +162,6 @@ std::expected<Result, Error> unrefinedResult(std::vector<ScoredPose> scored,
       std::chrono::steady_clock::now() - started).count(),
     .num_candidates = num_candidates,
     .survivors = std::move(scored),
-    .icp_refusals = {},
     .refusals = {}};
 }
 
@@ -413,10 +369,6 @@ std::vector<Candidate> candidatesOf(const Pose& pose,
 
 std::string validate(const Parameters& parameters)
 {
-  if (!parameters.refine && parameters.icp.has_value())
-    return "refine is false and a solver settings set is given, which asks for "
-      "no refinement and for one at the same time";
-
   if (parameters.da == 0U)
     return std::format("da must be greater than zero, got {}", parameters.da);
 
@@ -448,8 +400,6 @@ Localiser::Localiser(const Parameters& parameters,
   map_(std::move(map)),
   parameters_(parameters)
 {
-  if (parameters_.icp.has_value())
-    icp_refiner_.emplace(*parameters_.icp, map_);
 }
 
 /**
@@ -497,22 +447,20 @@ std::vector<Pose> Localiser::disperse() const
  * false on a map that plainly has some. The scan is then reduced exactly
  * once, by `reducedRanges`, and that single reduced scan is what the sift,
  * the refinement and the selection all work from.
- * Which refinement runs is settled once, here, rather than survivor by
- * survivor, and it is settled by whether one was built at construction.
  */
 std::expected<Result, Error> Localiser::localise(std::span<const double> ranges,
-  const double range_min, const double range_max,
-  std::span<const Pose> hypotheses, const double aperture) const
+  const double range_max, std::span<const Pose> hypotheses,
+  const double aperture) const
 {
   if (free_space_.cells.empty())
     return std::unexpected(Error{
       .reason = Error::Reason::map_has_no_free_space,
-      .icp_refusals = {}, .refusals = {}});
+      .refusals = {}});
 
   if (hypotheses.empty())
     return std::unexpected(Error{
       .reason = Error::Reason::no_hypotheses_given,
-      .icp_refusals = {}, .refusals = {}});
+      .refusals = {}});
 
   const std::chrono::steady_clock::time_point started =
     std::chrono::steady_clock::now();
@@ -522,7 +470,7 @@ std::expected<Result, Error> Localiser::localise(std::span<const double> ranges,
 
   if (!reduced.has_value())
     return std::unexpected(Error{
-      .reason = reduced.error(), .icp_refusals = {}, .refusals = {}});
+      .reason = reduced.error(), .refusals = {}});
 
   std::vector<ScoredPose> scored = scoredCandidatesOf(
     hypotheses, *reduced, aperture, range_max, parameters_, *map_);
@@ -538,15 +486,12 @@ std::expected<Result, Error> Localiser::localise(std::span<const double> ranges,
   if (!parameters_.refine)
     return unrefinedResult(scored, num_candidates, started);
 
-  const Refinement refinement = icp_refiner_.has_value()
-    ? correctedPosesOf(
-        scored, *reduced, range_min, range_max, aperture, *icp_refiner_)
-    : correctedPosesOf(scored, *reduced, range_max, aperture, corrector_);
+  const Refinement refinement =
+    correctedPosesOf(scored, *reduced, range_max, aperture, corrector_);
 
   if (refinement.corrected.empty())
     return std::unexpected(Error{
       .reason = Error::Reason::every_survivor_refused,
-      .icp_refusals = refinement.icp_refusals,
       .refusals = refinement.refusals});
 
   std::vector<ScoredPose> rescored;
@@ -571,7 +516,6 @@ std::expected<Result, Error> Localiser::localise(std::span<const double> ranges,
   if (std::isinf(winner->score))
     return std::unexpected(Error{
       .reason = Error::Reason::no_scorable_pose,
-      .icp_refusals = refinement.icp_refusals,
       .refusals = refinement.refusals});
 
   return Result{
@@ -580,15 +524,14 @@ std::expected<Result, Error> Localiser::localise(std::span<const double> ranges,
       std::chrono::steady_clock::now() - started).count(),
     .num_candidates = num_candidates,
     .survivors = std::move(scored),
-    .icp_refusals = refinement.icp_refusals,
     .refusals = refinement.refusals};
 }
 
 std::expected<Result, Error> Localiser::localise(std::span<const double> ranges,
-  const double range_min, const double range_max, const double aperture) const
+  const double range_max, const double aperture) const
 {
   const std::vector<Pose> hypotheses = disperse();
-  return localise(ranges, range_min, range_max, hypotheses, aperture);
+  return localise(ranges, range_max, hypotheses, aperture);
 }
 
 }

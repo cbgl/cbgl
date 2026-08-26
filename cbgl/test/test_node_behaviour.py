@@ -143,18 +143,18 @@ def generate_test_description():
             output_pose_topic=AGEING_POSE_TOPIC,
             dl=150.0, top_k_caers=500, num_threads=1)],
     )
-    # A sensor that does not see all the way round. It refines by the point to
-    # line solver because the panoramic matcher matches a full turn against a
-    # full turn and has nothing to say about three quarters of one, and it
-    # takes every ray it is handed rather than a fixed count, because a fixed
-    # count of a full turn's length would refuse this scan as too short.
+    # A sensor that does not see all the way round. It refines by the matcher,
+    # which reads the map over a whole turn at the sensor's own spacing and
+    # compares only the part of it the sensor could have seen. It takes every
+    # ray it is handed rather than a fixed count, which is what the package
+    # ships, because a fixed count of a full turn's length would refuse this
+    # scan as too short.
     narrow = launch_ros.actions.Node(
         package='cbgl',
         executable='cbgl_interface_node',
         name='cbgl_narrow',
         output='screen',
         parameters=[node_parameters(
-            refinement_method='icp',
             size_scan=0,
             map_topic=NARROW_MAP_TOPIC,
             scan_topic=NARROW_SCAN_TOPIC,
@@ -256,18 +256,29 @@ class TestNodeBehaviour(unittest.TestCase):
         """
         The middle 270 of the 360 rays, at the same spacing, from the same pose.
 
-        This is the case that would have caught a fault this package shipped
-        for a few hours. The algorithm learned to read a narrower sensor and the
-        node was never taught to tell it what aperture the scan carries, so the
-        call took the default of a whole turn and three quarters of a turn of
-        measurement was compared against a whole turn of map. Every trial came
-        back successful, reported no refusals and printed a plausible time, and
-        every answer was wrong by metres.
+        What this asserts is that a narrower sensor is localised at all,
+        end to end through the node: the map arrives, the scan arrives, the
+        service answers, and the answer is where the scan was cast from. It is
+        an integration case and that is the whole of its claim.
 
-        Nothing a caller can read said so. The path executed, the service
-        succeeded, the refusal counts were empty. Only a comparison against a
-        pose that is known catches it, which is why this asserts the answer
-        rather than the absence of a failure.
+        **What it does not do, measured rather than assumed.** It does not catch
+        the aperture being read as a whole turn. This fixture is a small room,
+        so three quarters of its map still overlaps a whole turn of it heavily,
+        and with the aperture ignored the answer here stays inside the four cell
+        bound below. This case was written when the narrower node refined by a
+        point to line solver, where that fault showed as a drift between the two
+        apertures of 0.5 degrees against 0.16 correct, and it carried an
+        assertion on that drift. Under the refinement this package now ships the
+        same measurement gives 0.43 degrees with the fault and 0.68 without, so
+        the faulty state is the closer of the two and the drift separates
+        nothing. The assertion is gone rather than retuned, because a bound that
+        does not tell the two states apart is worse than no bound: it reads like
+        a guard and is not one.
+
+        `test_corrector.cpp` in `fsm_localisation` is what catches that fault.
+        Reinstating it fails the three quarter turn case there and leaves every
+        panoramic case passing, which is the discrimination this fixture cannot
+        provide.
 
         The window is taken from the panoramic scan the other cases use rather
         than cast afresh, so the two are the same measurement seen through two
@@ -321,34 +332,6 @@ class TestNodeBehaviour(unittest.TestCase):
             msg='the robot faces %.4f radians and the node reported %.4f from '
                 'a scan covering three quarters of a turn'
                 % (self.expected[2], yaw_of(pose.orientation)))
-
-        # The bound above is four cells, which is loose enough to pass while a
-        # narrower sensor is answered systematically worse than a panoramic
-        # one. It was: the refinement laid its rays out across a whole turn
-        # whatever the aperture, so at three quarters of one it spaced them a
-        # third too far apart and biased every heading by about half a degree,
-        # and this case passed throughout.
-        #
-        # The two answers come from the same measurement seen through two
-        # apertures, so they have to agree far more closely than either has to
-        # match the truth. Three tenths of a degree sits between the two states
-        # rather than at either: the fault put them 0.5 degrees apart and the
-        # correct spacing puts them 0.16 apart on this fixture, a quarter of a
-        # cell at the mean range it carries. A tenth of a degree was tried
-        # first and refuses the correct code, which is a bound chosen from a
-        # hope rather than from either measurement.
-        panoramic = self.answer().pose.pose
-        drift = wrap(yaw_of(pose.orientation) - yaw_of(panoramic.orientation))
-
-        self.assertLess(
-            abs(drift), math.radians(0.3),
-            'the narrower sensor answered %.4f radians where the panoramic one '
-            'answered %.4f from the same measurement, a difference of %.3f '
-            'degrees. The two are the same scan through two apertures and have '
-            'to agree: a difference that grows with the aperture is the '
-            'refinement laying its rays out at the wrong spacing.'
-            % (yaw_of(pose.orientation), yaw_of(panoramic.orientation),
-               math.degrees(drift)))
 
     def test_2_the_answer_is_stamped_from_the_scan_that_produced_it(self):
         stamp = self.answer().header.stamp
