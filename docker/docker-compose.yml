@@ -5,7 +5,7 @@ services:
       context: ../..
       dockerfile: cbgl/docker/Dockerfile
 
-    image: cbgl:lyrical
+    image: li9i/cbgl:lyrical
     container_name: cbgl
     tty: true
     network_mode: "host"
