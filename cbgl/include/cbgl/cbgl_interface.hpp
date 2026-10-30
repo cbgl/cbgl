@@ -112,9 +112,15 @@ private:
 
   void publishHypotheses(const std::vector<Pose>& hypotheses,
     const rclcpp::Time& stamp);
+  /**
+   * @brief Publish the scan the answer would see, cast from the map, in the
+   * scan's own frame and at the scan's own angles.
+   * @param upside_down whether the sensor is mounted upside down, in which case
+   * `sensor` is the upright sensor its scan was handed over as.
+   */
   void publishMapScan(const fsm_localisation::OccupancyGridMap& map,
     const sensor_msgs::msg::LaserScan& scan, const Pose& sensor,
-    const rclcpp::Time& stamp);
+    bool upside_down, const rclcpp::Time& stamp);
   void publishPose(const Pose& robot, const rclcpp::Time& stamp);
   void publishTopHypotheses(const std::vector<ScoredPose>& survivors,
     const rclcpp::Time& stamp);

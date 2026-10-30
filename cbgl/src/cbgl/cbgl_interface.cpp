@@ -843,7 +843,7 @@ void Interface::localiseOnce(std_srvs::srv::Trigger::Response& outcome)
     publishTopHypotheses(result->survivors, stamp);
 
   if (map_scan_publisher_)
-    publishMapScan(*map, *scan, result->pose, stamp);
+    publishMapScan(*map, *scan, result->pose, placement->upside_down, stamp);
 
   if (odometry.has_value())
     publishTransform(robot, *odometry, stamp);
@@ -953,36 +953,49 @@ void Interface::publishHypotheses(const std::vector<Pose>& hypotheses,
 }
 
 /**
- * @details The cast is as long as the scan the run was reduced onto, which is
- * what makes it something to lay over the measurement, and it carries its own
- * angular spacing for the same reason: a run reduced onto fewer rays than the
- * sensor reported is a cast of fewer rays over the same full turn.
+ * @details The cast carries the scan's own frame, first angle, spacing and ray
+ * count, so that it lies over the scan the sensor reported ray for ray,
+ * whatever the search was reduced onto. Its ray `k` is cast along the
+ * direction the sensor's own ray `k` points in.
+ * `sensor` is the pose the search answered with. For a sensor mounted upside
+ * down that is the pose of the upright sensor its scan was handed over as,
+ * whose ray `n - 1 - k` points where the rolled sensor's ray `k` does, so the
+ * cast is taken in reverse order.
+ * Each ray is cast on its own, along exactly the angle the scan gives it. The
+ * caster lays a cast of one ray half a turn behind the pose it is given, so
+ * each is cast from a pose turned half a turn past the ray's own direction.
+ * One cast over a whole turn at the scan's spacing would lie over the scan
+ * only where a turn holds a whole number of its rays.
  * @remark The map is handed in rather than read from the node, so that a map
  * arriving while a run was under way cannot have this cast taken from it. What
  * is published is a cast from the map the answer was found in.
  */
 void Interface::publishMapScan(const fsm_localisation::OccupancyGridMap& map,
   const sensor_msgs::msg::LaserScan& scan, const Pose& sensor,
-  const rclcpp::Time& stamp)
+  const bool upside_down, const rclcpp::Time& stamp)
 {
-  const std::size_t rays = parameters_.matcher.size_scan == 0
-    ? scan.ranges.size() : parameters_.matcher.size_scan;
-
-  const std::vector<double> ranges =
-    map.ranges(sensor, static_cast<unsigned int>(rays), scan.range_max);
+  const std::size_t rays = scan.ranges.size();
 
   sensor_msgs::msg::LaserScan message;
   message.header.stamp = stamp;
   message.header.frame_id = scan.header.frame_id;
   message.angle_min = scan.angle_min;
-  message.angle_increment =
-    static_cast<float>(2.0 * M_PI / static_cast<double>(rays));
-  message.angle_max = message.angle_min +
-    static_cast<float>(rays - 1) * message.angle_increment;
+  message.angle_max = scan.angle_max;
+  message.angle_increment = scan.angle_increment;
   message.range_min = scan.range_min;
   message.range_max = scan.range_max;
+  message.ranges.reserve(rays);
 
-  message.ranges.assign(ranges.begin(), ranges.end());
+  for (std::size_t ray = 0; ray < rays; ray++)
+  {
+    const std::size_t upright_ray = upside_down ? rays - 1 - ray : ray;
+    const double heading = sensor.t + scan.angle_min +
+      static_cast<double>(upright_ray) * scan.angle_increment;
+
+    message.ranges.push_back(static_cast<float>(map.ranges(
+      Pose{.x = sensor.x, .y = sensor.y, .t = heading + M_PI}, 1U,
+      scan.range_max).front()));
+  }
 
   map_scan_publisher_->publish(message);
 }

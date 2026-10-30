@@ -352,6 +352,24 @@ def transform_message(frame_id, child_frame_id, placement, stamp, roll=0.0):
     return message
 
 
+def upside_down(ranges):
+    """
+    Return a panoramic scan as the same sensor reports it upside down.
+
+    The rolled sensor's ray at angle a reads what the upright sensor's ray at
+    -a reads, so each ray is looked up by its angle. The list is not simply
+    reversed: a panoramic scan whose first ray is at minus pi is not symmetric
+    about nought, and reversing it would turn the scan by a ray as well as
+    mirror it.
+    """
+    size = len(ranges)
+    increment = 2.0 * math.pi / size
+
+    return [ranges[round((-2.0 * FIRST_RAY_ANGLE - ray * increment)
+                         / increment) % size]
+            for ray in range(size)]
+
+
 def world_from_room(grid, pose):
     """
     Return a pose of the room placed in the world the grid's origin is given in.

@@ -4,6 +4,18 @@ Changelog for package cbgl
 
 Forthcoming
 -----------
+* Lays the optional map scan over the scan the sensor reported, ray for ray.
+  It was cast over a whole turn from half a turn behind the answer's heading,
+  at the ray count the search was reduced onto, and published under the scan's
+  own first angle in the scan's own frame. For a sensor that does not see all
+  the way round it was drawn turned and stretched, for one mounted upside down
+  it was drawn mirrored, and with ``size_scan`` set it carried a different
+  number of rays from the scan it was laid over. It now carries the scan's own
+  first angle, spacing and ray count, each of its rays is cast along the
+  direction of the sensor's own ray, and for a sensor mounted upside down the
+  rays are taken in the order that sensor reports them. In the package's test
+  room the cast disagrees with the scan by 0.024 to 0.025 m a ray on average,
+  where before it disagreed by 0.31 m mirrored and 0.19 m turned and stretched.
 * Reads a sensor mounted upside down from the transform tree, with nothing to
   set. The sensor's placement on the robot was read as a heading and nothing
   more, so a lidar mounted half a turn about its forward axis was taken for an

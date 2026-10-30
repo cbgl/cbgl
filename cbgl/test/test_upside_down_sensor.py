@@ -62,7 +62,6 @@ import math
 import unittest
 
 from cbgl_test_support import (
-    FIRST_RAY_ANGLE,
     Harness,
     keep_alive,
     node_parameters,
@@ -73,6 +72,7 @@ from cbgl_test_support import (
     robot_from_sensor,
     SENSOR_FRAME,
     SENSOR_ON_ROBOT,
+    upside_down,
     world_from_room,
     wrap,
     yaw_of,
@@ -108,24 +108,6 @@ def generate_test_description():
             [node, keep_alive(), launch_testing.actions.ReadyToTest()]),
         {'cbgl': node},
     )
-
-
-def upside_down(ranges):
-    """
-    Return a panoramic scan as the same sensor reports it upside down.
-
-    The rolled sensor's ray at angle a reads what the upright sensor's ray at
-    -a reads, so each ray is looked up by its angle. The list is not simply
-    reversed: a panoramic scan whose first ray is at minus pi is not symmetric
-    about nought, and reversing it would turn the scan by a ray as well as
-    mirror it.
-    """
-    size = len(ranges)
-    increment = 2.0 * math.pi / size
-
-    return [ranges[round((-2.0 * FIRST_RAY_ANGLE - ray * increment)
-                         / increment) % size]
-            for ray in range(size)]
 
 
 class TestUpsideDownSensor(unittest.TestCase):
