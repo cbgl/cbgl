@@ -335,9 +335,17 @@ def transform_message(frame_id, child_frame_id, placement, stamp, roll=0.0):
     A roll turns the child about its own forward axis before the placement's
     heading turns it about the vertical. Half a turn of roll is a sensor
     mounted upside down.
+
+    The cosine of half the roll is taken as the sine of a quarter turn less
+    half the roll. The two are equal, but at half a turn of roll the cosine
+    comes to 6e-17 and the sine to exactly nought. Left at 6e-17, the
+    rotation's z and w would still carry the heading in their ratio, so a
+    node that took the heading from those two alone could not be told apart
+    from one that reads the whole rotation.
     """
     half_yaw = placement[2] / 2.0
     half_roll = roll / 2.0
+    cos_half_roll = math.sin(math.pi / 2.0 - half_roll)
 
     message = TransformStamped()
     message.header.stamp.sec, message.header.stamp.nanosec = stamp
@@ -347,8 +355,8 @@ def transform_message(frame_id, child_frame_id, placement, stamp, roll=0.0):
     message.transform.translation.y = placement[1]
     message.transform.rotation.x = math.cos(half_yaw) * math.sin(half_roll)
     message.transform.rotation.y = math.sin(half_yaw) * math.sin(half_roll)
-    message.transform.rotation.z = math.sin(half_yaw) * math.cos(half_roll)
-    message.transform.rotation.w = math.cos(half_yaw) * math.cos(half_roll)
+    message.transform.rotation.z = math.sin(half_yaw) * cos_half_roll
+    message.transform.rotation.w = math.cos(half_yaw) * cos_half_roll
     return message
 
 
