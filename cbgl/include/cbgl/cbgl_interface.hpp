@@ -67,6 +67,19 @@ public:
 
 private:
   
+  /**
+   * @brief Where one frame sits in another, seen from above.
+   * @details `pose` is the frame's position and the heading of its x axis in
+   * the plane. `upside_down` says whether its z axis points down. A sensor
+   * mounted upside down has its z axis down, and its rays sweep clockwise
+   * where an upright sensor's sweep counterclockwise.
+   */
+  struct Placement
+  {
+    Pose pose;
+    bool upside_down{false};
+  };
+
   void declareParameters();
 
   /**
@@ -93,8 +106,9 @@ private:
    * @return the placement, or a sentence naming both frames and saying the tree
    * does not carry one against the other.
    */
-  std::expected<Pose, std::string> placementOf(const std::string& frame_id,
-    const std::string& in_frame_id, const rclcpp::Time& stamp) const;
+  std::expected<Placement, std::string> placementOf(
+    const std::string& frame_id, const std::string& in_frame_id,
+    const rclcpp::Time& stamp) const;
 
   void publishHypotheses(const std::vector<Pose>& hypotheses,
     const rclcpp::Time& stamp);
@@ -126,7 +140,7 @@ private:
    * twice what the scan already says.
    * @return the placement, or a sentence saying the tree does not carry it.
    */
-  std::expected<Pose, std::string> sensorOnRobot(
+  std::expected<Placement, std::string> sensorOnRobot(
     const std::string& sensor_frame_id, const rclcpp::Time& stamp) const;
 
   /**

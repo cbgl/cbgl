@@ -328,16 +328,27 @@ def shifted(stamp, seconds):
     return (total // 10 ** 9, total % 10 ** 9)
 
 
-def transform_message(frame_id, child_frame_id, placement, stamp):
-    """Return one transform of the tree, stamped as asked."""
+def transform_message(frame_id, child_frame_id, placement, stamp, roll=0.0):
+    """
+    Return one transform of the tree, stamped as asked.
+
+    A roll turns the child about its own forward axis before the placement's
+    heading turns it about the vertical. Half a turn of roll is a sensor
+    mounted upside down.
+    """
+    half_yaw = placement[2] / 2.0
+    half_roll = roll / 2.0
+
     message = TransformStamped()
     message.header.stamp.sec, message.header.stamp.nanosec = stamp
     message.header.frame_id = frame_id
     message.child_frame_id = child_frame_id
     message.transform.translation.x = placement[0]
     message.transform.translation.y = placement[1]
-    message.transform.rotation.z = math.sin(placement[2] / 2.0)
-    message.transform.rotation.w = math.cos(placement[2] / 2.0)
+    message.transform.rotation.x = math.cos(half_yaw) * math.sin(half_roll)
+    message.transform.rotation.y = math.sin(half_yaw) * math.sin(half_roll)
+    message.transform.rotation.z = math.sin(half_yaw) * math.cos(half_roll)
+    message.transform.rotation.w = math.cos(half_yaw) * math.cos(half_roll)
     return message
 
 
@@ -599,7 +610,8 @@ class Harness(Node):
         """Put where the sensor sits on the robot into the transform tree."""
         self.publish_transform(ROBOT_FRAME, SENSOR_FRAME, placement)
 
-    def publish_transform(self, frame_id, child_frame_id, placement):
+    def publish_transform(self, frame_id, child_frame_id, placement,
+                          roll=0.0):
         """
         Put one static transform into the tree, beside any already there.
 
@@ -607,7 +619,8 @@ class Harness(Node):
         message, which is what a static broadcaster does and what makes a single
         latched message enough for whoever subscribes next.
         """
-        message = transform_message(frame_id, child_frame_id, placement, (0, 0))
+        message = transform_message(frame_id, child_frame_id, placement, (0, 0),
+                                    roll)
 
         self.static_transforms = [
             transform for transform in self.static_transforms

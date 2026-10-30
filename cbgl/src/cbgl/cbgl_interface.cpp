@@ -39,6 +39,7 @@
 #include <rcl_interfaces/msg/parameter_descriptor.hpp>
 #include <tf2/LinearMath/Matrix3x3.hpp>
 #include <tf2/LinearMath/Quaternion.hpp>
+#include <tf2/LinearMath/Vector3.hpp>
 
 #include "cbgl/free_space.hpp"
 #include "cbgl/map_file.hpp"
@@ -158,6 +159,33 @@ rcl_interfaces::msg::ParameterDescriptor readOnly()
   descriptor.read_only = true;
 
   return descriptor;
+}
+
+/**
+ * @brief The rotation a quaternion carries, whole.
+ * @return the rotation, or `std::nullopt` where the quaternion is not finite
+ * or has no length to be normalised by.
+ */
+std::optional<tf2::Matrix3x3> rotationOf(
+  const geometry_msgs::msg::Quaternion& orientation)
+{
+  if (!std::isfinite(orientation.x) || !std::isfinite(orientation.y) ||
+    !std::isfinite(orientation.z) || !std::isfinite(orientation.w))
+  {
+    return std::nullopt;
+  }
+
+  const double norm_squared =
+    orientation.x * orientation.x + orientation.y * orientation.y +
+    orientation.z * orientation.z + orientation.w * orientation.w;
+
+  constexpr double kMinimumQuaternionNormSquared = 1e-9;
+
+  if (norm_squared < kMinimumQuaternionNormSquared)
+    return std::nullopt;
+
+  return tf2::Matrix3x3(tf2::Quaternion(
+    orientation.x, orientation.y, orientation.z, orientation.w));
 }
 
 /**
@@ -283,32 +311,59 @@ std::string sentenceOf(const Error& error)
   return "the localisation failed for an unrecognised reason";
 }
 
-std::optional<double> yawOf(const geometry_msgs::msg::Quaternion& orientation)
+/**
+ * @brief A scan's ranges in the order an upright sensor reports them, and
+ * where on the robot that upright sensor stands.
+ */
+struct UprightScan
 {
-  if (!std::isfinite(orientation.x) || !std::isfinite(orientation.y) ||
-    !std::isfinite(orientation.z) || !std::isfinite(orientation.w))
+  Pose sensor;
+  std::vector<double> ranges;
+};
+
+/**
+ * @brief `scan` as an upright sensor would have reported it, and where on the
+ * robot that sensor stands.
+ * @details An upright sensor's ray `k` lies at heading `h + a_k` on the robot,
+ * where `h` is the heading of the sensor's x axis and
+ * `a_k = angle_min + k * angle_increment`, and the algorithm reads every scan
+ * as an upright sensor's. A sensor whose z axis points down sweeps the other
+ * way, so its ray `j` lies at `h - a_j`, and reading it as `h + a_j` reads the
+ * mirror image of the room.
+ * Reversing the ranges puts them back in counterclockwise order. Ray `k` of
+ * the reversed scan is ray `n - 1 - k` of the scan, which lies at
+ * `h - angle_min - (n - 1 - k) * angle_increment`, and that is
+ * `(h - s) + a_k` with `s = 2 * angle_min + (n - 1) * angle_increment`, the
+ * sum of the scan's first and last angles. The reversed scan is therefore
+ * exactly what an upright sensor with the same angles reports from heading
+ * `h - s`, and it is handed over as that sensor's. No ray is dropped or
+ * interpolated, and whatever is done downstream with an upright scan's angles
+ * is done with these in the same way.
+ * @remark `s` is nought for a scan symmetric about the sensor's heading, and
+ * there the reversal alone is the mirror. It is minus one ray for a panoramic
+ * scan beginning at minus pi, and a reversal without the turn would rotate the
+ * answer by that ray.
+ */
+UprightScan uprightScanOf(const sensor_msgs::msg::LaserScan& scan,
+  const Pose& placement, const bool upside_down)
+{
+  if (!upside_down)
   {
-    return std::nullopt;
+    return UprightScan{
+      .sensor = placement,
+      .ranges = std::vector<double>(scan.ranges.begin(), scan.ranges.end())};
   }
 
-  const double norm_squared =
-    orientation.x * orientation.x + orientation.y * orientation.y +
-    orientation.z * orientation.z + orientation.w * orientation.w;
+  const double rays = static_cast<double>(scan.ranges.size());
+  const double skew =
+    2.0 * scan.angle_min + (rays - 1.0) * scan.angle_increment;
 
-  constexpr double kMinimumQuaternionNormSquared = 1e-9;
-
-  if (norm_squared < kMinimumQuaternionNormSquared)
-    return std::nullopt;
-
-  const tf2::Quaternion quaternion(
-    orientation.x, orientation.y, orientation.z, orientation.w);
-
-  double roll = 0.0;
-  double pitch = 0.0;
-  double yaw = 0.0;
-  tf2::Matrix3x3(quaternion).getRPY(roll, pitch, yaw);
-
-  return FSM::Utils::wrapAngle(yaw);
+  return UprightScan{
+    .sensor = Pose{
+      .x = placement.x,
+      .y = placement.y,
+      .t = FSM::Utils::wrapAngle(placement.t - skew)},
+    .ranges = std::vector<double>(scan.ranges.rbegin(), scan.ranges.rend())};
 }
 
 }
@@ -730,7 +785,7 @@ void Interface::localiseOnce(std_srvs::srv::Trigger::Response& outcome)
 
   const rclcpp::Time stamp(scan->header.stamp);
 
-  const std::expected<Pose, std::string> placement =
+  const std::expected<Placement, std::string> placement =
     sensorOnRobot(scan->header.frame_id, stamp);
 
   if (!placement.has_value())
@@ -743,24 +798,25 @@ void Interface::localiseOnce(std_srvs::srv::Trigger::Response& outcome)
 
   if (tf_broadcast_)
   {
-    const std::expected<Pose, std::string> odometry_placement =
+    const std::expected<Placement, std::string> odometry_placement =
       placementOf(odom_frame_id_, base_frame_id_, stamp);
 
     if (odometry_placement.has_value())
-      odometry = *odometry_placement;
+      odometry = odometry_placement->pose;
     else
       RCLCPP_WARN(get_logger(), "Broadcasting nothing for this answer: %s",
         odometry_placement.error().c_str());
   }
 
-  const std::vector<double> ranges(scan->ranges.begin(), scan->ranges.end());
+  const UprightScan upright =
+    uprightScanOf(*scan, placement->pose, placement->upside_down);
   const std::vector<Pose> hypotheses = localiser->disperse();
 
   const double aperture =
     static_cast<double>(scan->ranges.size()) * scan->angle_increment;
 
   const std::expected<Result, Error> result = localiser->localise(
-    ranges, scan->range_max, hypotheses, aperture);
+    upright.ranges, scan->range_max, hypotheses, aperture);
 
   if (!result.has_value())
   {
@@ -776,7 +832,7 @@ void Interface::localiseOnce(std_srvs::srv::Trigger::Response& outcome)
       parameters_.top_k_caers);
   }
 
-  const Pose robot = compose(result->pose, invert(*placement));
+  const Pose robot = compose(result->pose, invert(upright.sensor));
 
   publishPose(robot, stamp);
 
@@ -837,8 +893,12 @@ void Interface::mapCallback(nav_msgs::msg::OccupancyGrid::ConstSharedPtr map)
  * does: a tree that has not caught up yet is worth waiting a moment for, and a
  * tree
  * that never carries the frame at all must not hold this thread for good.
+ * The whole rotation is read, not its yaw alone. The heading kept is that of
+ * the frame's x axis in the plane, and whether its z axis points down is kept
+ * beside it. A sensor mounted upside down has the same heading as an upright
+ * one, so the heading alone cannot tell the two apart.
  */
-std::expected<Pose, std::string> Interface::placementOf(
+std::expected<Interface::Placement, std::string> Interface::placementOf(
   const std::string& frame_id, const std::string& in_frame_id,
   const rclcpp::Time& stamp) const
 {
@@ -857,9 +917,10 @@ std::expected<Pose, std::string> Interface::placementOf(
       tf_lookup_timeout_.seconds(), exception.what()));
   }
 
-  const std::optional<double> yaw = yawOf(placement.transform.rotation);
+  const std::optional<tf2::Matrix3x3> rotation =
+    rotationOf(placement.transform.rotation);
 
-  if (!yaw.has_value())
+  if (!rotation.has_value())
   {
     return std::unexpected(std::format(
       "the placement of \"{}\" in \"{}\" carries no heading: a quaternion "
@@ -867,10 +928,14 @@ std::expected<Pose, std::string> Interface::placementOf(
       in_frame_id));
   }
 
-  return Pose{
-    placement.transform.translation.x,
-    placement.transform.translation.y,
-    *yaw};
+  const tf2::Vector3 forward = rotation->getColumn(0);
+
+  return Placement{
+    .pose = Pose{
+      .x = placement.transform.translation.x,
+      .y = placement.transform.translation.y,
+      .t = FSM::Utils::wrapAngle(std::atan2(forward.y(), forward.x()))},
+    .upside_down = rotation->getColumn(2).z() < 0.0};
 }
 
 void Interface::publishHypotheses(const std::vector<Pose>& hypotheses,
@@ -1067,10 +1132,10 @@ void Interface::scanCallback(sensor_msgs::msg::LaserScan::ConstSharedPtr scan)
  * Nothing has to be told twice what the scan already says, so there is no
  * parameter for the sensor's frame and there is not to be one.
  */
-std::expected<Pose, std::string> Interface::sensorOnRobot(
+std::expected<Interface::Placement, std::string> Interface::sensorOnRobot(
   const std::string& sensor_frame_id, const rclcpp::Time& stamp) const
 {
-  const std::expected<Pose, std::string> placement =
+  const std::expected<Placement, std::string> placement =
     placementOf(sensor_frame_id, base_frame_id_, stamp);
 
   if (placement.has_value())

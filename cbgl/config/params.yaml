@@ -25,9 +25,10 @@
     # --------------------------------------------------------------------------
     # IO topics
     # --------------------------------------------------------------------------
-    # 2d panoramic scans are read here. The newest one is held until the service
-    # asks for it; a scan on its own causes nothing to happen. A sensor that
-    # does not see all the way round is not supported.
+    # 2d scans are read here. The newest one is held until the service asks for
+    # it; a scan on its own causes nothing to happen. A sensor that does not
+    # see all the way round is supported, as long as its scan is centred on the
+    # sensor's heading.
     scan_topic: "/scan"
 
     # The map to localise in. Subscribed with transient local durability and a

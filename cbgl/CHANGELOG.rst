@@ -4,6 +4,19 @@ Changelog for package cbgl
 
 Forthcoming
 -----------
+* Reads a sensor mounted upside down from the transform tree, with nothing to
+  set. The sensor's placement on the robot was read as a heading and nothing
+  more, so a lidar mounted half a turn about its forward axis was taken for an
+  upright one and its scan was read as the mirror image of the room. On the
+  recording the published real world experiment was run on, whose lidar is
+  mounted that way, none of twenty frames was answered inside half a metre and
+  five degrees. The whole rotation is now read. The heading is that of the
+  sensor's x axis, and where its z axis points down the ranges are taken in
+  reverse order and laid out from that heading less the sum of the scan's first
+  and last angles. The sum is nought for a scan symmetric about the sensor's
+  heading. It is minus one ray for a panoramic scan beginning at minus pi, where
+  reversing the ranges alone would turn the answer by one ray. This is what
+  ``laser_z_orientation: downwards`` was for in the ROS 1 build.
 * Carries one refinement rather than two. The ROS 1 package shipped Andrea
   Censi's canonical scan matcher selected, and this port carried it as an option
   so that a run here could be compared against results published from that
@@ -124,9 +137,12 @@ Forthcoming
   ray tracer that is gone, and which was also the value the Kinetic version fell
   back to when the setting was absent. An unrecognised name is now refused at
   start-up rather than quietly replaced.
-* Removes ``laser_z_orientation``. It existed to compensate for reading the
-  grid's rows in reverse, which the replacement map handles itself along with the
-  origin's translation and its rotation.
+* Removes ``laser_z_orientation``. In the ROS 1 build it said which way the
+  sensor's z axis pointed. Its shipped value, ``upwards``, compensated for that
+  build reading the grid's rows in reverse, which the replacement map handles
+  itself along with the origin's translation and its rotation. ``downwards``
+  served a sensor mounted upside down, which is read from the transform tree
+  instead.
 * Removes ``do_undersample_scan`` and ``undersample_rate``. ``size_scan`` does
   this, and does it by resampling rather than by dropping every nth ray.
 * Removes ``do_icp``, ``do_fsm`` and ``pkg_name``.
