@@ -122,8 +122,9 @@ Forthcoming
   two allocations that were never freed. The follow-up record says so, since
   there is nothing left for a test to guard.
 * Stamps every published message from the scan that produced the answer rather
-  than from the wall clock, and publishes in ``global_frame_id`` rather than in
-  the hardcoded literal ``/map``, which carried a leading slash tf2 rejects.
+  than from the wall clock. The answer is published in ``fixed_frame_id`` rather
+  than in the hardcoded literal ``/map``, which carried a leading slash tf2
+  rejects.
 * Runs the sift across all cores, splitting by hypothesis index so that the
   ranking and the answer do not depend on the thread count.
 * Adds ``std_srvs/srv/Trigger`` in place of ``std_srvs/Empty``, and the service
@@ -136,11 +137,10 @@ Forthcoming
 * Adds three optional diagnostic topics, each off while its name is empty: the
   whole dispersed set, the survivors of the sift in ranking order, and the scan
   the answer would see cast from the map. These replace ``publish_pose_sets``.
-* Renames ``fixed_frame_id`` to ``global_frame_id``, following the family, and
-  ``base_frame_id`` to ``robot_frame_id``. The second keeps its meaning and its
-  ``base_footprint`` default: it is the frame the published pose places, and a
-  configuration carried across has to rename it rather than drop it. The sensor's
-  own frame is not a setting in either version, being read off the scan message.
+* Keeps the ROS 1 names ``fixed_frame_id``, ``base_frame_id`` and
+  ``odom_frame_id``, with the same meanings and defaults. A configuration
+  carried across keeps them as they are. The sensor's own frame is not a setting
+  in either version, being read off the scan message.
 * Renames the node from ``cbgl_node`` to ``cbgl`` and defaults its namespace to
   ``/`` rather than to ``robot``, so the service that answered at
   ``/robot/cbgl_node/global_localization`` answers at

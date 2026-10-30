@@ -194,10 +194,14 @@
     #
     # How many rays a scan is reduced to, once, before the sift. The same
     # reduced scan is what the sift, the refinement and the selection all work
-    # from, and the cast from the map is taken at the same length.
+    # from. Each of them casts a whole turn from the map, at the reduced scan's
+    # angular spacing. It then compares only the middle of that cast, as wide
+    # as the reduced scan.
     #
-    # 0, shipped, uses every ray the scan carries, so a sensor of any ray count
-    # and any aperture works with nothing set. This used to ship 360, a whole
+    # 0, shipped, uses every ray the scan carries. So any scan the node accepts
+    # needs nothing set here, whatever its ray count. The node accepts a scan
+    # centred on the sensor's heading that spans no more than a full turn, at a
+    # positive angle_increment. This used to ship 360, a whole
     # turn's worth, and a sensor covering three quarters of one carries 270 and
     # was refused as too short. The refusal named the ray count and never the
     # aperture, so the setting to change was not the one a reader would look

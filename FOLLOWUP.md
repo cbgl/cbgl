@@ -54,7 +54,8 @@ caveat turned out to be describing a defect rather than a property. The scan
 matcher refinement was never told what the sensor covered, so it read the map
 over a whole turn and matched it against a fraction of one. That is repaired in
 `fsm_localisation`, whose corrector now takes the aperture as a required
-argument. Both refinements follow the sensor at any aperture it can cover.
+argument. The `icp` value was removed later, and the scan matcher, now the only
+refinement, follows the sensor at any aperture it can cover.
 
 A scan whose first ray does not sit half its own span behind the sensor's
 heading, or which claims to span more than a turn, is still refused at the

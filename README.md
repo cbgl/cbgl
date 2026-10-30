@@ -60,7 +60,7 @@ Steps 2 and 3 are where the time goes, and the second of the two dominates. See 
 * ROS 2 Lyrical
 * A compiler with C++23
 * [`fsm_localisation`](https://github.com/fourier-scan-matcher/fsm-localisation), which provides the scan matcher that refines each survivor, the ray casting that reads the map, and the occupancy grid type both use. `cbgl` carries no copy of any of them.
-* A 2D lidar. One that sees **all the way round** is what this is built for and what every recorded figure was taken with. A narrower one is supported: the map is read all the way round at the sensor's own angular resolution and only the part of it the sensor could have seen is compared. The scan must say what it covers, through `angle_min` and `angle_increment`, and must be centred on the sensor's heading; one that is not is refused at the point of use rather than answered wrongly.
+* A 2D lidar. One that sees **all the way round** is what this is built for. A narrower one is supported: the map is read all the way round at the sensor's own angular resolution and only the part of it the sensor could have seen is compared. The scan must say what it covers, through `angle_min` and `angle_increment`, and must be centred on the sensor's heading; one that is not is refused at the point of use rather than answered wrongly.
 
 ## Installation
 
@@ -288,7 +288,7 @@ A cell no sensor has ever seen blocks a ray whatever `occupancy_threshold` is se
 
 ### Refinement
 
-Every survivor of the sift is refined against the map. Two algorithms can do it and this chooses which.
+This chooses whether the survivors of the sift are refined against the map before the best of them is published.
 
 | Parameter | Meaning | Default | Shipped |
 | --- | --- | --- | --- |
@@ -298,7 +298,7 @@ Every survivor of the sift is refined against the map. Two algorithms can do it 
 
 The ROS 1 package offered a second refinement, Andrea Censi's canonical scan matcher, and shipped with it selected. **That path is not carried here.** It was, and it was removed once the scan matcher had been measured against it: at three quarters of a turn, a thousand trials, the scan matcher answers 99.6 per cent of trials inside half a metre and five degrees with a median error of 0.8 mm against the solver's 99.8 per cent and 4.3 mm, and it is the quicker of the two. Keeping it cost an LGPL v3 dependency with no ROS 2 release, three patches against a commit upstream has not moved since 2022, and one of those patches correcting a write past the end of a buffer. Nothing it did was worth that.
 
-**A sensor that cannot see all the way round works with either refinement.** What supports such a sensor is the sift: it reads the map all the way round at the sensor's own angular resolution, which is more readings than the sensor has, and compares only the middle window of the sensor's own length. The refinement then decides whether the answer survives the last stage, and both refinements now follow the sensor's own aperture rather than assuming a whole turn.
+**A sensor that cannot see all the way round is supported with either value.** What supports such a sensor is the sift: it reads the map all the way round at the sensor's own angular resolution, which is more readings than the sensor has, and compares only the middle window of the sensor's own length. With `fsm`, the refinement and the final selection also cast a whole turn and compare only that middle window. With `none`, nothing is refined and the sift's own best candidate is the answer.
 
 This page used to say that a narrower sensor wanted the other refinement, because the scan matcher matched a full turn against a full turn. That was a defect in the scan matcher path rather than a property of it: nothing told that refinement what the sensor covered, so it read the map over a whole turn and matched it against three quarters of one, which converges on a confident wrong answer rather than failing. It is repaired, and repairing it is what left the second refinement with nothing to do.
 
@@ -321,7 +321,7 @@ Handed through to `fsm_localisation` and refused by that package's own validator
 | `enforce_translation_bound` | `false` | `true` |
 | `recover_on_failed_sift` | `false` | `true` |
 
-`size_scan` is how many rays a scan is reduced to, once, before the sift. The same reduced scan is what the sift, the refinement and the selection all work from, and the cast from the map is taken at the same length. `0` uses every ray the scan carries, and a scan carrying fewer rays than this is refused.
+`size_scan` is how many rays a scan is reduced to, once, before the sift. The same reduced scan is what the sift, the refinement and the selection all work from. Each of them casts a whole turn from the map, at the reduced scan's angular spacing. It then compares only the middle of that cast, as wide as the reduced scan. `0` uses every ray the scan carries, and a scan carrying fewer rays than this is refused.
 
 **The shipped `0` refuses no scan for its ray count.** It takes every ray the scan carries, whatever the sensor's aperture. This used to ship `360`, a full turn's worth of rays. So a sensor covering three quarters of a turn at the same spacing carried 270 rays and was refused as too short. Any other value still refuses a scan that carries fewer rays than that value. Nothing derives the value from the aperture, and the refusal names `size_scan` and not the aperture.
 

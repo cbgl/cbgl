@@ -56,8 +56,9 @@ namespace
  * against it. A scan whose first ray sits somewhere other than half its own
  * span behind the heading is a legal scan and a wrong answer here, rotated by
  * whatever the two conventions differ by, so it is refused rather than read as
- * though it agreed. A ray of slack is allowed, which is more than the rounding
- * of a float and less than a ray.
+ * though it agreed. One ray of slack is allowed, which is more than the
+ * rounding of a float: a span or a first ray is refused only where it is out
+ * by more than `angle_increment`.
  * A scan spanning less than a turn is accepted. It was not before: this
  * package localised panoramic sensors and nothing else, and a narrower one was
  * refused here rather than answered wrongly. What supports it now is the
