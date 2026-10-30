@@ -232,7 +232,7 @@ The **Default** column is what the node declares. The **Shipped** column is what
 
 | Parameter | Meaning | Default | Shipped |
 | --- | --- | --- | --- |
-| `scan_topic` | where 2D panoramic scans are published | `/scan` | `/scan` |
+| `scan_topic` | where 2D scans are published | `/scan` | `/scan` |
 | `output_pose_topic` | where the answer is published | `/initialpose` | `/initialpose` |
 | `hypotheses_topic` | optional. Every hypothesis drawn. Empty publishes nothing | empty | empty |
 | `top_hypotheses_topic` | optional. The survivors of the sift. Empty publishes nothing | empty | empty |
@@ -308,7 +308,7 @@ Handed through to `fsm_localisation` and refused by that package's own validator
 
 | Parameter | Default | Shipped |
 | --- | --- | --- |
-| `size_scan` | `0` | `360` |
+| `size_scan` | `0` | `0` |
 | `min_magnification_size` | `0` | `0` |
 | `max_magnification_size` | `3` | `3` |
 | `num_iterations` | `2` | `3` |
@@ -323,7 +323,7 @@ Handed through to `fsm_localisation` and refused by that package's own validator
 
 `size_scan` is how many rays a scan is reduced to, once, before the sift. The same reduced scan is what the sift, the refinement and the selection all work from, and the cast from the map is taken at the same length. `0` uses every ray the scan carries, and a scan carrying fewer rays than this is refused.
 
-**A sensor that does not see all the way round needs this changed.** The shipped `360` is a full turn's worth of rays, so a sensor covering three quarters of one at the same spacing carries 270 and is refused as too short, with a message that names the ray count and not the aperture. Set `size_scan: 0` to take every ray the sensor sends, or to that sensor's own ray count. Nothing derives it for you, and the refusal will not tell you the aperture is why.
+**The shipped `0` refuses no scan for its ray count.** It takes every ray the scan carries, whatever the sensor's aperture. This used to ship `360`, a full turn's worth of rays. So a sensor covering three quarters of a turn at the same spacing carried 270 rays and was refused as too short. Any other value still refuses a scan that carries fewer rays than that value. Nothing derives the value from the aperture, and the refusal names `size_scan` and not the aperture.
 
 `xy_bound` is shipped at 1.2 m against the matcher's own default of 0.2 m, because a survivor of the sift stands at the centre of a cell and can be a cell or more from the truth.
 
@@ -360,7 +360,7 @@ No pose is published for a refused run. Each reason is returned as a sentence in
 | no scan has arrived | the node |
 | the sensor's placement is not in the transform tree | the node |
 | a run is already under way | the node |
-| the scan is not panoramic | the node |
+| the scan is not centred on the sensor's heading, spans more than a full turn, or has an `angle_increment` that is not positive | the node |
 | the map has no free space at all | the algorithm |
 | an empty hypothesis set was handed in | the algorithm |
 | the scan is shorter than `size_scan` | the algorithm |
@@ -369,7 +369,7 @@ No pose is published for a refused run. Each reason is returned as a sentence in
 | no corrected pose could be scored | the algorithm |
 | the run did not finish, and what stopped it | anywhere. A run that runs out of memory on a large map is the case this exists for, and it answers with a sentence rather than falling silent |
 
-"Not panoramic" needs a word. The map is cast over exactly one turn beginning half a turn behind the sensor's heading, and the measured scan is read the same way. A scan whose first ray sits anywhere else is a legal scan that this algorithm would read as though it began where it did not, and the answer would come back rotated. It is refused, naming the field and the value it carried, rather than answered wrongly.
+"Not centred" needs a word. The algorithm reads the map over one turn that begins half a turn behind the sensor's heading. It compares only the middle of that turn, as wide as the scan, so the scan must begin half its own span behind the heading. A legal scan that begins more than a ray from there would give an answer that is rotated. The node refuses such a scan and names the field and the value it carried, rather than answer wrongly. A scan narrower than a full turn is not refused for being narrower.
 
 ## What the map costs and what it bounds
 

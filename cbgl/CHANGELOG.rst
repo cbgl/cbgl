@@ -154,11 +154,13 @@ Forthcoming
   with a sentence naming the setting and the value it was given, and the process
   exits with 1 rather than aborting. Every parameter is read only thereafter, so
   a runtime set is refused rather than accepted and quietly ignored.
-* Refuses a scan that is not panoramic, naming the field and the value it
-  carried. The map is cast over exactly one turn beginning half a turn behind the
-  sensor's heading and the measured scan is read the same way, so a legal scan
-  beginning elsewhere would otherwise be answered with a pose rotated by half a
-  turn, in silence.
+* Refuses a scan that is not centred on the sensor's heading, and names the
+  field and the value it carried. The algorithm reads the map over one turn
+  that begins half a turn behind the sensor's heading. It compares only the
+  middle of that turn, as wide as the scan. A legal scan that begins elsewhere
+  would otherwise be answered with a rotated pose, in silence. A scan that spans
+  more than a full turn, or carries an ``angle_increment`` that is not positive,
+  is refused too. A scan narrower than a full turn is accepted.
 * Carries no arithmetic build option of its own. The two that govern the
   arithmetic and the transform planning belong to ``fsm_localisation`` and this
   package follows whatever that package was built with. The matcher is a header
