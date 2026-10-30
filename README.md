@@ -259,7 +259,7 @@ Frame names carry no leading slash. tf2 rejects one, and one is refused at start
 | `tf_broadcast` | broadcast `fixed_frame_id` <- `odom_frame_id` for each answer | `false` | `true` |
 | `tf_lookup_timeout` | seconds to wait for a transform before refusing a run | `0.1` | `0.1` |
 
-The sensor's own frame is **not** a parameter. It is read off the scan message, and the node works out where the sensor sits on the robot by looking `base_frame_id` up against it. That transform must exist in the tree or every run is refused for want of it.
+The sensor's own frame is **not** a parameter. It is read off the scan message, and the node works out where the sensor sits on the robot by looking `base_frame_id` up against it. That transform must exist in the tree or every run is refused for want of it. The same transform also says whether the sensor is mounted upside down, with its z axis pointing down, so no setting is needed for it.
 
 `tf_broadcast` defaults to false because broadcasting into somebody else's transform tree is intrusive. The shipped file turns it on, which is what the ROS 1 package shipped.
 

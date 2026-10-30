@@ -92,7 +92,9 @@
     # against the scan's own, so that transform must exist in the tree or every
     # run is refused for want of it. The sensor's frame is read off the scan
     # message rather than named here, so that nothing has to be told twice what
-    # the scan already says.
+    # the scan already says. The same transform also says whether the sensor is
+    # mounted upside down, with its z axis pointing down, so no setting is
+    # needed for it.
     base_frame_id: "base_footprint"
 
     # The odometry frame, read only when broadcasting.
