@@ -114,7 +114,8 @@ def build_map(stamp, grid, frame_id=GLOBAL_FRAME):
 
 
 def build_scan(stamp, ranges, frame_id=SENSOR_FRAME,
-               first_ray_angle=FIRST_RAY_ANGLE, increment=None):
+               first_ray_angle=FIRST_RAY_ANGLE, increment=None,
+               range_min=0.0):
     """
     Return a scan of the given ranges, stamped as asked.
 
@@ -128,6 +129,9 @@ def build_scan(stamp, ranges, frame_id=SENSOR_FRAME,
     len(ranges) * increment, which is what the node reads the aperture off, and
     first_ray_angle has to be half of that behind the heading or the node
     refuses the scan rather than answering it wrongly.
+
+    Give range_min to say the sensor cannot measure anything nearer. The
+    default of nought leaves no reading below it.
     """
     size = len(ranges)
     if increment is None:
@@ -141,7 +145,7 @@ def build_scan(stamp, ranges, frame_id=SENSOR_FRAME,
     scan.angle_increment = increment
     scan.time_increment = 0.0
     scan.scan_time = 0.1
-    scan.range_min = 0.0
+    scan.range_min = range_min
     scan.range_max = RANGE_MAX
     scan.ranges = [float(r) for r in ranges]
     scan.intensities = []
@@ -627,10 +631,12 @@ class Harness(Node):
         self.publish_transform(ODOM_FRAME, ROBOT_FRAME, placement)
 
     def publish_scan(self, ranges, stamp=SCAN_STAMP, frame_id=SENSOR_FRAME,
-                     first_ray_angle=FIRST_RAY_ANGLE, increment=None):
+                     first_ray_angle=FIRST_RAY_ANGLE, increment=None,
+                     range_min=0.0):
         """Send one scan to the node."""
         self.scan_publisher.publish(
-            build_scan(stamp, ranges, frame_id, first_ray_angle, increment))
+            build_scan(stamp, ranges, frame_id, first_ray_angle, increment,
+                       range_min))
 
     def publish_sensor_placement(self, placement=SENSOR_ON_ROBOT):
         """Put where the sensor sits on the robot into the transform tree."""

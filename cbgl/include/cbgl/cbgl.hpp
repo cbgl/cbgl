@@ -290,7 +290,10 @@ public:
 
   /**
    * @brief Localise from a hypothesis set of the caller's own.
-   * @param ranges the scan as the sensor reported it, unfilled and unreduced.
+   * @param ranges the scan as the sensor reported it, unfilled and unreduced,
+   * with every reading below its `range_min` or above its `range_max` made
+   * not a number. This takes any finite reading above nought as a return and
+   * is not given the minimum to tell such a reading by.
    * @param range_max the scan's own maximum range, which is what a ray meeting
    * nothing reports. The map has never seen it, so it is given per
    * localisation rather than held.

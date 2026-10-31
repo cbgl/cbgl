@@ -4,6 +4,19 @@ Changelog for package cbgl
 
 Forthcoming
 -----------
+* Treats a reading below the scan's own ``range_min`` or above its own
+  ``range_max`` as missing, exactly as it treats one that is not a number. By
+  the ROS convention neither is a distance to anything, and both were read as
+  returns wherever they were finite and above nought: a wall touching the
+  sensor, or a wall farther away than the sensor can see. The sensor of a real
+  robot this package has been run against reports 0.001 m against a
+  ``range_min`` of 0.023 m in one and a half per cent of its readings. In the
+  package's test room, a scan with a sector of each kind was answered 2.030 m
+  and 139.9 degrees from the same scan with those sectors missing, and is now
+  answered 0.000 m and 0.000 degrees from it in each of three runs. A reading
+  equal to either limit is still a return. The node makes such readings
+  missing before the scan reaches ``Localiser::localise``, which still takes
+  no minimum range.
 * Reads a scan reduced to fewer rays at the angles its reduced rays are
   compared at. The reduction laid the scan over a whole turn whatever the
   sensor covered, so for a sensor that does not see all the way round each

@@ -148,6 +148,31 @@ Pose invert(const Pose& a)
 }
 
 /**
+ * @brief The ranges a scan carries, each reading outside the scan's own limits
+ * made missing.
+ * @details By the convention a `sensor_msgs::msg::LaserScan` follows, a
+ * reading below `range_min` or above `range_max` is not a distance to anything.
+ * The algorithm takes every finite reading above nought as a return, so such a
+ * reading would be read as a wall the sensor never saw: one touching the
+ * sensor, or one farther away than it can see. It is made not a number, which
+ * is how the algorithm already reads a reading the sensor did not make. A
+ * reading equal to either limit is a return.
+ */
+std::vector<double> rangesOf(const sensor_msgs::msg::LaserScan& scan)
+{
+  std::vector<double> ranges(scan.ranges.begin(), scan.ranges.end());
+
+  std::ranges::replace_if(ranges,
+    [&scan](const double range)
+    {
+      return range < scan.range_min || range > scan.range_max;
+    },
+    std::numeric_limits<double>::quiet_NaN());
+
+  return ranges;
+}
+
+/**
  * @brief A descriptor marking a setting read only.
  * @details Every setting is read once, at construction, and nothing reads one
  * again. A value set while the node runs would therefore be accepted and would
@@ -340,6 +365,8 @@ struct UprightScan
  * `h - s`, and it is handed over as that sensor's. No ray is dropped or
  * interpolated, and whatever is done downstream with an upright scan's angles
  * is done with these in the same way.
+ * The ranges either way are those `rangesOf` gives, so a reading outside the
+ * scan's own limits reaches the algorithm already missing.
  * @remark `s` is nought for a scan symmetric about the sensor's heading, and
  * there the reversal alone is the mirror. It is minus one ray for a panoramic
  * scan beginning at minus pi, and a reversal without the turn would rotate the
@@ -348,11 +375,13 @@ struct UprightScan
 UprightScan uprightScanOf(const sensor_msgs::msg::LaserScan& scan,
   const Pose& placement, const bool upside_down)
 {
+  const std::vector<double> ranges = rangesOf(scan);
+
   if (!upside_down)
   {
     return UprightScan{
       .sensor = placement,
-      .ranges = std::vector<double>(scan.ranges.begin(), scan.ranges.end())};
+      .ranges = ranges};
   }
 
   const double rays = static_cast<double>(scan.ranges.size());
@@ -364,7 +393,7 @@ UprightScan uprightScanOf(const sensor_msgs::msg::LaserScan& scan,
       .x = placement.x,
       .y = placement.y,
       .t = FSM::Utils::wrapAngle(placement.t - skew)},
-    .ranges = std::vector<double>(scan.ranges.rbegin(), scan.ranges.rend())};
+    .ranges = std::vector<double>(ranges.rbegin(), ranges.rend())};
 }
 
 }
