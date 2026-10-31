@@ -185,8 +185,20 @@ std::expected<Result, Error> unrefinedResult(std::vector<ScoredPose> scored,
  * `fsm_localisation::Corrector::correct` fills a zero again from the rays
  * either side of it, which for the first ray are the second and the last, so
  * the refinement would read a range the sift never saw.
- * @remark A scan already `size_scan` rays long is returned as it is, missing
- * readings and all, and compared ray for ray where the window lays it.
+ * @remark A scan already the length asked for, which every scan is where
+ * `size_scan` is zero, is read the same way unless its ray `j` already lies
+ * where the window compares ray `j`. Such a scan is returned as it is, missing
+ * readings and all, and compared ray for ray where the window lays it. How far
+ * ray `j` lies from where it is compared grows linearly with `j`, so only the
+ * first and the last ray are checked, each to within `2 * pi` times the
+ * epsilon of a 32 bit float, 7.5e-7 radians. A scan carrying its angles as
+ * 32 bit floats, as a `sensor_msgs` scan does, has its first angle rounded by
+ * at most `pi` times half that epsilon and its last ray moved by at most three
+ * times as much, both inside it. The 1073 rays a quarter of
+ * a degree apart from -134 degrees that a real robot's sensor reports lie at
+ * most 1.4e-7 radians off, and a whole turn from -pi lies off by nothing but
+ * that rounding. A centred scan of 1072 rays at that spacing lies half a ray,
+ * 2.2e-3 radians, off, and is read at the angles its rays are compared at.
  */
 std::expected<std::vector<double>, Error::Reason> reducedRanges(
   std::span<const double> ranges, const Parameters& parameters,
@@ -205,26 +217,34 @@ std::expected<std::vector<double>, Error::Reason> reducedRanges(
   if (std::ranges::none_of(scan, fsm_localisation::isValidRange))
     return std::unexpected(Error::Reason::scan_entirely_invalid);
 
-  if (scan.size() == target)
-    return scan;
-
-  const std::vector<double> filled = FSM::DatasetUtils::interpolateRanges(scan);
-
-  const double increment = aperture / static_cast<double>(filled.size());
-  const double last = static_cast<double>(filled.size() - 1);
+  const double increment = aperture / static_cast<double>(scan.size());
 
   const std::size_t panoramic = panoramicRaysOf(target, aperture);
   const std::size_t prefix = prefixOf(panoramic, target);
+
+  const auto positionOf = [&](const std::size_t j)
+  {
+    const double compared = -M_PI + 2.0 * M_PI *
+      static_cast<double>(prefix + j) / static_cast<double>(panoramic);
+
+    return (compared - angle_min) / increment;
+  };
+
+  const double slack =
+    2.0 * M_PI * std::numeric_limits<float>::epsilon() / increment;
+  const double last = static_cast<double>(scan.size() - 1);
+
+  if (scan.size() == target && std::abs(positionOf(0)) <= slack &&
+      std::abs(positionOf(target - 1) - last) <= slack)
+    return scan;
+
+  const std::vector<double> filled = FSM::DatasetUtils::interpolateRanges(scan);
 
   std::vector<double> reduced(target);
 
   for (std::size_t j = 0; j < target; j++)
   {
-    const double compared = -M_PI + 2.0 * M_PI *
-      static_cast<double>(prefix + j) / static_cast<double>(panoramic);
-
-    const double position =
-      std::clamp((compared - angle_min) / increment, 0.0, last);
+    const double position = std::clamp(positionOf(j), 0.0, last);
 
     const std::size_t below = static_cast<std::size_t>(std::floor(position));
     const std::size_t above = std::min(below + 1, filled.size() - 1);

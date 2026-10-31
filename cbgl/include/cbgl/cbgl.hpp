@@ -305,9 +305,9 @@ public:
    * @param angle_min the angle of the scan's first ray from the sensor's
    * heading, in radians, as the scan reports it. The scan's rays are taken to
    * lie `aperture` over their count apart, which is how the node computes the
-   * aperture. A scan reduced to fewer rays is read at the angles its reduced
-   * rays are compared at, and this is what places those angles among the
-   * sensor's own rays.
+   * aperture. A scan is read at the angles its rays are compared at, reduced
+   * to fewer rays or not, and this is what places those angles among the
+   * sensor's own rays. A scan whose rays already lie there is read as it is.
    * @remark Neither `aperture` nor `angle_min` carries a default,
    * deliberately. A default of a whole turn would let a caller with a narrower
    * sensor say nothing and be answered confidently and wrongly. That failure

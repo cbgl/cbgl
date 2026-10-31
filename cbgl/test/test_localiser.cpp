@@ -53,10 +53,11 @@
  * asserted at the five centimetre grids alone: at twenty centimetre cells four
  * cells is most of the width of this room, and a bound that loose would pass
  * on a wrong answer.
- * **A narrower sensor, reduced.** One case casts a scan narrower than a turn
- * at a real sensor's spacing and reduces it to fewer rays than it carries.
- * Its tolerance is a third one, on the heading alone, set by where the
- * reduction can place the rays it keeps, and that case sets it out.
+ * **A narrower sensor, reduced and not.** Two cases cast a scan narrower than
+ * a turn at a real sensor's spacing. One reduces it to fewer rays than it
+ * carries, and one matches it at its own count. Their tolerance is a third
+ * one, on the heading alone, set by where the window compares the rays
+ * against where they were taken, and each case sets it out.
  * **Every refusal.** All six: a map with no free space, an empty hypothesis
  * set, a scan shorter than the matcher asks for, a scan carrying no usable
  * range, a refinement that refused every survivor, and a pose the metric cannot
@@ -190,6 +191,13 @@ const double kSensorIncrement = 0.25 * M_PI / 180.0;
  * fourth of its rays counted from the first, which is 269.
  */
 const std::size_t kReducedRays = (kSensorRays - 1U) / 4U + 1U;
+
+/**
+ * @brief That sensor less one ray: 1072 rays at the same spacing, centred on
+ * its heading, which puts its first ray at -133.875 degrees, half a ray off
+ * every ray a whole turn cast at that spacing lays.
+ */
+const unsigned int kEvenSensorRays = kSensorRays - 1U;
 
 /**
  * @brief The scans cast from the room's own polygons, and the poses they were
@@ -1330,6 +1338,143 @@ TEST(Localiser, TheHypothesesDrawnAreTheHypothesesSearched)
   EXPECT_GT(result->execution_time, 0.0)
     << "a run that took no measurable time did not happen. The execution time "
     << "is what a host reports and what the two builds are compared on.";
+}
+
+/**
+ * @brief A scan narrower than a turn, matched at its own ray count, is not
+ * answered at a heading turned by where the window compares its rays.
+ * @details
+ * **The scene.** The sensor of `kEvenSensorRays` rays `kSensorIncrement`
+ * apart sees from each of the room's truth poses what a whole turn cast at
+ * half its spacing shows on every other ray: 2880 rays to the turn, kept from
+ * ray `(-133.875 + 180) / 0.125`, which is 369. The aperture is the ray count
+ * times the spacing, 268 degrees, which is how the node computes it.
+ * `size_scan` is nought, so the scan is not reduced to fewer rays and every
+ * stage compares 1072. The truth is handed in as the one hypothesis,
+ * so that the window decides the heading and the draw does not.
+ * **Where the rays are compared.** The window lays 1072 rays over 268 degrees
+ * as `round(1072 * 360 / 268)`, which is 1440 rays to the turn, and keeps them
+ * from ray `round((1440 - 1072) / 2)`, which is 184. Ray 0 is therefore
+ * compared at `-180 + 184 * 360 / 1440`, which is -134.000 degrees, where the
+ * sensor took it at -133.875. Every ray is compared 0.125 degrees, half the
+ * spacing, clockwise of where it was taken, so the answer turns by about as
+ * much to make the scan and the map agree.
+ * **Why this sensor.** Where the turn less the ray count is odd, the rounding
+ * of the prefix puts the middle of the window on the heading. Where it is
+ * even, the middle lies half a ray clockwise of it. A centred sensor of an
+ * even count has its own middle on the heading, so the window misplaces every
+ * one of its rays by half a ray. The real sensor's 1073 rays leave 367, odd,
+ * and lie on the window, as does every scan of a whole turn. One ray fewer is
+ * the least change that moves the sensor off it.
+ * **The bound.** Half of that misplacement, 0.0625 degrees, held against the
+ * lean: the signed heading error averaged over the room's three poses.
+ * **Both regimes, measured on both grids, which agree to the last digit
+ * shown.** With the scan compared ray for ray where the window lays it, the
+ * three poses lean +0.1259, +0.1679 and +0.1259 degrees: a lean of +0.140,
+ * above the bound. With the scan sampled at the angles its rays are compared
+ * at, by interpolating between the sensor's rays either side as a reduced
+ * scan is, they lean 0.0000, 0.0000 and 0.0000: a lean of 0.000, below it.
+ * @remark The lean is held to the bound rather than each pose, as in the
+ * reduced case. Here each pose would separate the two on its own as well.
+ */
+TEST_P(LocaliserOnAFineGrid, ANarrowerScanLeftUnreducedDoesNotLean)
+{
+  const GridCase grid = GetParam();
+
+  const GridFixture fixture = readGrid(grid.file);
+  const std::shared_ptr<const OccupancyGridMap> map = mapOf(fixture);
+  ASSERT_NE(map, nullptr);
+
+  const std::vector<Pose> room_poses = readTruth(kTruthFixture);
+  ASSERT_FALSE(room_poses.empty())
+    << "the truth fixture " << kTruthFixture << " named no pose, so there is "
+    << "no lean to average.";
+
+  const double degrees = 180.0 / M_PI;
+
+  const double aperture = kEvenSensorRays * kSensorIncrement;
+  const double angle_min = -0.5 * (kEvenSensorRays - 1U) * kSensorIncrement;
+
+  const unsigned int cast_per_sensor_ray = 2U;
+  const double cast_increment = kSensorIncrement / cast_per_sensor_ray;
+
+  const double cast_turn = kFullTurn / cast_increment;
+  const double cast_first = (angle_min + M_PI) / cast_increment;
+
+  ASSERT_DOUBLE_EQ(cast_turn, std::round(cast_turn))
+    << "a turn is not a whole number of rays at half the sensor's spacing, so "
+    << "no cast of a whole turn lays a ray where every one of the sensor's "
+    << "rays lies.";
+  ASSERT_DOUBLE_EQ(cast_first, std::round(cast_first))
+    << "the sensor's first ray does not fall on a ray of the whole turn cast "
+    << "at half its spacing.";
+
+  const unsigned int rays_to_the_turn =
+    static_cast<unsigned int>(std::lround(cast_turn));
+  const std::size_t first = static_cast<std::size_t>(std::lround(cast_first));
+
+  const double window_turn =
+    std::round(kEvenSensorRays * kFullTurn / aperture);
+  const double window_first =
+    std::round((window_turn - kEvenSensorRays) / 2.0);
+
+  const double compared = -M_PI + window_first * kFullTurn / window_turn;
+  const double misplacement = angle_min - compared;
+  const double bound = misplacement / 2.0;
+
+  Parameters parameters = parametersOf(kTopK);
+  parameters.matcher.size_scan = 0U;
+
+  const Localiser localiser(parameters, map, freeSpaceOfMap(*map));
+
+  const double resolution = map->resolution();
+  const double cells = 2.0;
+
+  std::vector<double> errors;
+  std::ostringstream each;
+
+  for (std::size_t s = 0; s < room_poses.size(); s++)
+  {
+    const Pose truth = worldFromRoom(*map, fixture.origin_yaw, room_poses[s]);
+    ASSERT_TRUE(map->isFree(truth.x, truth.y));
+
+    const std::vector<double> turn =
+      map->ranges(truth, rays_to_the_turn, kRangeMax);
+
+    std::vector<double> measured(kEvenSensorRays);
+    for (std::size_t k = 0; k < measured.size(); k++)
+      measured[k] = turn[first + k * cast_per_sensor_ray];
+
+    const std::vector<Pose> hypotheses{truth};
+
+    const std::expected<Result, Error> result =
+      localiser.localise(measured, kRangeMax, hypotheses, aperture, angle_min);
+
+    ASSERT_TRUE(result.has_value())
+      << "truth pose " << s << " on the " << grid.label << " grid, handed in "
+      << "as the one hypothesis, produced no pose at all.";
+
+    ASSERT_NEAR(result->pose.x, truth.x, cells * resolution)
+      << "truth pose " << s << " on the " << grid.label << " grid was placed "
+      << "elsewhere, so its heading says nothing about the window.";
+    ASSERT_NEAR(result->pose.y, truth.y, cells * resolution);
+
+    errors.push_back(FSM::Utils::wrapAngle(result->pose.t - truth.t));
+    each << " " << errors.back() * degrees;
+  }
+
+  const double lean =
+    std::accumulate(errors.begin(), errors.end(), 0.0) / errors.size();
+
+  EXPECT_LE(std::abs(lean) * degrees, bound * degrees)
+    << "a scan of " << kEvenSensorRays << " rays over " << aperture * degrees
+    << " degrees, matched at that count, leans " << lean * degrees
+    << " degrees on the " << grid.label << " grid, the poses one by one"
+    << each.str() << ". Its ray 0 is compared at " << compared * degrees
+    << " degrees and the sensor took it at " << angle_min * degrees
+    << ", so a window that hands the one the other's range misplaces every "
+    << "ray by " << misplacement * degrees << " degrees and the answer turns "
+    << "to match. The bound is half that, " << bound * degrees << " degrees.";
 }
 
 /**
