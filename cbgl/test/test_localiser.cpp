@@ -53,6 +53,10 @@
  * asserted at the five centimetre grids alone: at twenty centimetre cells four
  * cells is most of the width of this room, and a bound that loose would pass
  * on a wrong answer.
+ * **A narrower sensor, reduced.** One case casts a scan narrower than a turn
+ * at a real sensor's spacing and reduces it to fewer rays than it carries.
+ * Its tolerance is a third one, on the heading alone, set by where the
+ * reduction can place the rays it keeps, and that case sets it out.
  * **Every refusal.** All six: a map with no free space, an empty hypothesis
  * set, a scan shorter than the matcher asks for, a scan carrying no usable
  * range, a refinement that refused every survivor, and a pose the metric cannot
@@ -171,6 +175,21 @@ const double kRangeMax = 100.0;
  * marking a reading under it unusable rather than treating it as a distance.
  */
 const double kFullTurn = 2.0 * M_PI;
+
+/**
+ * @brief A sensor narrower than a turn: 1073 rays a quarter of a degree
+ * apart, centred on its heading, which puts its first ray at -134 degrees.
+ * @details The geometry of a real robot's sensor this package has been run
+ * against.
+ */
+const unsigned int kSensorRays = 1073U;
+const double kSensorIncrement = 0.25 * M_PI / 180.0;
+
+/**
+ * @brief How many rays that sensor's scan is reduced to: as many as every
+ * fourth of its rays counted from the first, which is 269.
+ */
+const std::size_t kReducedRays = (kSensorRays - 1U) / 4U + 1U;
 
 /**
  * @brief The scans cast from the room's own polygons, and the poses they were
@@ -527,7 +546,7 @@ TEST(Localiser, AHypothesisSetHandedInIsTheSetTheSearchUses)
   const Localiser localiser(parametersOf(kTopK), map, freeSpaceOfMap(*map));
 
   const std::expected<Result, Error> result =
-    localiser.localise(measured, kRangeMax, hypotheses, kFullTurn);
+    localiser.localise(measured, kRangeMax, hypotheses, kFullTurn, -M_PI);
 
   ASSERT_TRUE(result.has_value())
     << "the one hypothesis handed in is the pose the measurement was cast at, "
@@ -558,7 +577,7 @@ TEST(Localiser, AMapWithNoFreeSpaceIsRefused)
   const std::vector<double> measured(kRayCount, 1.0);
 
   const std::expected<Result, Error> result =
-    localiser.localise(measured, kRangeMax, kFullTurn);
+    localiser.localise(measured, kRangeMax, kFullTurn, -M_PI);
 
   ASSERT_FALSE(result.has_value())
     << "a map with no free cell offers nowhere for the sensor to have been, so "
@@ -616,7 +635,7 @@ TEST(Localiser, AMapWithNothingInRangeIsRefusedBeforeAnUnscorablePoseCanWin)
   const std::vector<Pose> hypotheses{standing};
 
   const std::expected<Result, Error> result =
-    localiser.localise(measured, kRangeMax, hypotheses, kFullTurn);
+    localiser.localise(measured, kRangeMax, hypotheses, kFullTurn, -M_PI);
 
   ASSERT_FALSE(result.has_value())
     << "every pose on this map is unscorable, since no ray from any of them "
@@ -728,7 +747,7 @@ TEST(Localiser, AMeasurementEntirelyAtItsMaximumRangeIsRankedByTheSpaceSeen)
   const Localiser localiser(parametersOf(kTopK), map, free_space);
 
   const std::expected<Result, Error> result =
-    localiser.localise(measured, kRangeMax, hypotheses, kFullTurn);
+    localiser.localise(measured, kRangeMax, hypotheses, kFullTurn, -M_PI);
 
   ASSERT_TRUE(result.has_value())
     << "a measurement entirely at its own maximum range is answered today, "
@@ -780,7 +799,7 @@ TEST(Localiser, AMeasurementEntirelyAtItsMaximumRangeIsRankedByTheSpaceSeen)
 
 /**
  * @brief An empty hypothesis set is refused for being empty.
- * @details The four argument entry point exists so a caller can hand in a
+ * @details The five argument entry point exists so a caller can hand in a
  * hypothesis set of its own, and an empty one is the caller's doing rather than
  * the map's. Reporting it as a map with no free space is a false sentence about
  * a map with thousands of free cells, and it sends whoever reads the log to
@@ -814,7 +833,7 @@ TEST(Localiser, AnEmptyHypothesisSetIsRefusedForBeingEmpty)
   const std::vector<Pose> none;
 
   const std::expected<Result, Error> refused =
-    localiser.localise(measured, kRangeMax, none, kFullTurn);
+    localiser.localise(measured, kRangeMax, none, kFullTurn, -M_PI);
 
   ASSERT_FALSE(refused.has_value())
     << "there is no hypothesis to score, so there is nothing to rank, nothing "
@@ -828,7 +847,7 @@ TEST(Localiser, AnEmptyHypothesisSetIsRefusedForBeingEmpty)
   const std::vector<Pose> one{truth};
 
   EXPECT_TRUE(
-    localiser.localise(measured, kRangeMax, one, kFullTurn).has_value())
+    localiser.localise(measured, kRangeMax, one, kFullTurn, -M_PI).has_value())
     << "the same localiser, the same map and the same scan answer from a set "
     << "of one pose, so the refusal above is about the set being empty and "
     << "about nothing else in the run.";
@@ -911,7 +930,7 @@ TEST(Localiser, AReferenceThatCastsNothingFromAFreePoseYieldsNoAnswer)
   const std::vector<Pose> hypotheses{standing};
 
   const std::expected<Result, Error> result =
-    localiser.localise(measured, kRangeMax, hypotheses, kFullTurn);
+    localiser.localise(measured, kRangeMax, hypotheses, kFullTurn, -M_PI);
 
   ASSERT_FALSE(result.has_value())
     << "the pose the run would have reported cannot be graded by the very "
@@ -969,7 +988,7 @@ TEST(Localiser, AScanCarryingNoRaysAtAllIsRefused)
   const std::vector<double> no_rays;
 
   const std::expected<Result, Error> result =
-    localiser.localise(no_rays, kRangeMax, kFullTurn);
+    localiser.localise(no_rays, kRangeMax, kFullTurn, -M_PI);
 
   ASSERT_FALSE(result.has_value())
     << "the matcher is set to " << kRayCount << " rays and the scan carries "
@@ -1011,7 +1030,7 @@ TEST(Localiser, AScanOfMoreRaysThanTheMatcherAsksForIsReducedAndStillRecovers)
   const Localiser localiser(parameters, map, freeSpaceOfMap(*map));
 
   const std::expected<Result, Error> result =
-    localiser.localise(measured, kRangeMax, kFullTurn);
+    localiser.localise(measured, kRangeMax, kFullTurn, -M_PI);
 
   ASSERT_TRUE(result.has_value())
     << "the scan was cast from this very map at a pose inside the room, at "
@@ -1046,7 +1065,7 @@ TEST(Localiser, AScanShorterThanTheMatcherAsksForIsRefused)
   const std::vector<double> too_short(kRayCount / 36U, 1.0);
 
   const std::expected<Result, Error> result =
-    localiser.localise(too_short, kRangeMax, kFullTurn);
+    localiser.localise(too_short, kRangeMax, kFullTurn, -M_PI);
 
   ASSERT_FALSE(result.has_value())
     << "the matcher is set to " << kRayCount << " rays and the scan carries "
@@ -1099,7 +1118,7 @@ TEST(Localiser, AScanTheSeamHasNoBusinessRefusingIsRefusedByNeitherLayer)
   const Localiser localiser(parameters, map, freeSpaceOfMap(*map));
 
   const std::expected<Result, Error> library =
-    localiser.localise(ranges, kRangeMax, kFullTurn);
+    localiser.localise(ranges, kRangeMax, kFullTurn, -M_PI);
 
   const bool library_called_it_short = !library.has_value() &&
     library.error().reason == Error::Reason::scan_too_short;
@@ -1149,7 +1168,7 @@ TEST(Localiser, AScanWithNoUsableRangeIsRefused)
   const std::vector<double> unusable(kRayCount, 0.0);
 
   const std::expected<Result, Error> result =
-    localiser.localise(unusable, kRangeMax, kFullTurn);
+    localiser.localise(unusable, kRangeMax, kFullTurn, -M_PI);
 
   ASSERT_FALSE(result.has_value())
     << "every ray of the scan is zero, which is one of the three ways a lidar "
@@ -1177,9 +1196,9 @@ TEST(Localiser, EveryLocalisationOfTheSameScanGivesTheSameAnswer)
   const Localiser localiser(parametersOf(kTopK), map, freeSpaceOfMap(*map));
 
   const std::expected<Result, Error> first =
-    localiser.localise(measured, kRangeMax, kFullTurn);
+    localiser.localise(measured, kRangeMax, kFullTurn, -M_PI);
   const std::expected<Result, Error> second =
-    localiser.localise(measured, kRangeMax, kFullTurn);
+    localiser.localise(measured, kRangeMax, kFullTurn, -M_PI);
 
   ASSERT_TRUE(first.has_value());
   ASSERT_TRUE(second.has_value());
@@ -1197,7 +1216,7 @@ TEST(Localiser, EveryLocalisationOfTheSameScanGivesTheSameAnswer)
     parametersOf(kTopK), map, freeSpaceOfMap(*map));
 
   const std::expected<Result, Error> elsewhere =
-    second_localiser.localise(measured, kRangeMax, kFullTurn);
+    second_localiser.localise(measured, kRangeMax, kFullTurn, -M_PI);
 
   ASSERT_TRUE(elsewhere.has_value());
 
@@ -1240,7 +1259,7 @@ TEST(Localiser, EverySurvivorRefusedByTheMatcherRefusesTheRun)
   const Localiser localiser(parametersOf(kTopK), map, freeSpaceOfMap(*map));
 
   const std::expected<Result, Error> result =
-    localiser.localise(measured, kRangeMax, in_the_wall, kFullTurn);
+    localiser.localise(measured, kRangeMax, in_the_wall, kFullTurn, -M_PI);
 
   ASSERT_FALSE(result.has_value())
     << "every hypothesis handed in stands inside the room's wall, so the "
@@ -1296,7 +1315,7 @@ TEST(Localiser, TheHypothesesDrawnAreTheHypothesesSearched)
   ASSERT_GT(drawn, 0u);
 
   const std::expected<Result, Error> result =
-    localiser.localise(measured, kRangeMax, kFullTurn);
+    localiser.localise(measured, kRangeMax, kFullTurn, -M_PI);
 
   ASSERT_TRUE(result.has_value());
 
@@ -1311,6 +1330,140 @@ TEST(Localiser, TheHypothesesDrawnAreTheHypothesesSearched)
   EXPECT_GT(result->execution_time, 0.0)
     << "a run that took no measurable time did not happen. The execution time "
     << "is what a host reports and what the two builds are compared on.";
+}
+
+/**
+ * @brief A scan narrower than a turn, reduced to fewer rays, is not answered
+ * at a heading turned by where the reduction put the rays it kept.
+ * @details
+ * **The scene.** The sensor of `kSensorRays` rays `kSensorIncrement` apart
+ * sees from each of the room's truth poses what a whole turn cast at its own
+ * spacing shows over the part of that turn it covers: 1440 rays to the turn,
+ * kept from ray `(-134 + 180) / 0.25`, which is 184. The aperture is the ray
+ * count times the spacing, 268.25 degrees, which is how the node computes it.
+ * The matcher asks for `kReducedRays`, and the truth is handed in as the one
+ * hypothesis, so that the reduction and what follows from it decide the
+ * heading and the draw does not.
+ * **Where the reduced rays are compared.** The window lays 269 rays over
+ * 268.25 degrees as `round(269 * 360 / 268.25)`, which is 361 rays to the
+ * turn, and keeps them from ray `round((361 - 269) / 2)`, which is 46. Reduced
+ * ray 0 is therefore compared at `-180 + 46 * 360 / 361`, which is -134.127
+ * degrees. A reduction that lays the scan over a whole turn hands reduced ray
+ * 0 the range of the sensor's first ray, taken at -134.000. That misplaces it
+ * by 0.127 degrees, and the rest of the reduced rays by about as much, so the
+ * answer turns by about as much to make the scan and the map agree.
+ * **The bound.** Half of that misplacement, 0.064 degrees, held against the
+ * lean: the signed heading error averaged over the room's three poses. A lean
+ * under half the misplacement is nearer to a scan read at its own angles than
+ * to the misplaced one.
+ * **Both regimes, measured on both grids, which agree to the last digit
+ * shown.** With the reduction that assumes a whole turn the three poses lean
+ * +0.1247, +0.1673 and +0.1673 degrees: a lean of +0.153, above the bound.
+ * With the scan sampled at the angles its reduced rays are compared at, by
+ * interpolating between the sensor's rays either side, they lean -0.0181,
+ * 0.0000 and -0.0426: a lean of -0.020, below it. Reduced ray 0 lies half a
+ * sensor ray outside the first ray, and those figures leave it missing. Given
+ * the first ray's range instead, the three are -0.0181, 0.0000 and +0.0714: a
+ * lean of +0.018.
+ * @remark No single pose is held to the bound. Sampling at the compared
+ * angles reached +0.0714 degrees on one pose, above it, and a bound set
+ * between that and the +0.1247 the reduction as it stands reached would sit
+ * under 0.03 degrees from either. The lean separates the two with more room
+ * on both sides.
+ */
+TEST_P(LocaliserOnAFineGrid, ANarrowerScanReducedToFewerRaysDoesNotLean)
+{
+  const GridCase grid = GetParam();
+
+  const GridFixture fixture = readGrid(grid.file);
+  const std::shared_ptr<const OccupancyGridMap> map = mapOf(fixture);
+  ASSERT_NE(map, nullptr);
+
+  const std::vector<Pose> room_poses = readTruth(kTruthFixture);
+  ASSERT_FALSE(room_poses.empty())
+    << "the truth fixture " << kTruthFixture << " named no pose, so there is "
+    << "no lean to average.";
+
+  const double degrees = 180.0 / M_PI;
+
+  const double aperture = kSensorRays * kSensorIncrement;
+  const double angle_min = -0.5 * (kSensorRays - 1U) * kSensorIncrement;
+
+  const double sensor_turn = kFullTurn / kSensorIncrement;
+  const double sensor_first = (angle_min + M_PI) / kSensorIncrement;
+
+  ASSERT_DOUBLE_EQ(sensor_turn, std::round(sensor_turn))
+    << "a turn is not a whole number of the sensor's rays, so no cast of a "
+    << "whole turn lays a ray where every one of the sensor's rays lies.";
+  ASSERT_DOUBLE_EQ(sensor_first, std::round(sensor_first))
+    << "the sensor's first ray does not fall on a ray of the whole turn cast "
+    << "at its spacing.";
+
+  const unsigned int rays_to_the_turn =
+    static_cast<unsigned int>(std::lround(sensor_turn));
+  const std::size_t first = static_cast<std::size_t>(std::lround(sensor_first));
+
+  const double window_turn =
+    std::round(kReducedRays * kFullTurn / aperture);
+  const double window_first =
+    std::round((window_turn - kReducedRays) / 2.0);
+
+  const double compared = -M_PI + window_first * kFullTurn / window_turn;
+  const double misplacement = angle_min - compared;
+  const double bound = misplacement / 2.0;
+
+  Parameters parameters = parametersOf(kTopK);
+  parameters.matcher.size_scan = kReducedRays;
+
+  const Localiser localiser(parameters, map, freeSpaceOfMap(*map));
+
+  const double resolution = map->resolution();
+  const double cells = 2.0;
+
+  std::vector<double> errors;
+  std::ostringstream each;
+
+  for (std::size_t s = 0; s < room_poses.size(); s++)
+  {
+    const Pose truth = worldFromRoom(*map, fixture.origin_yaw, room_poses[s]);
+    ASSERT_TRUE(map->isFree(truth.x, truth.y));
+
+    const std::vector<double> turn =
+      map->ranges(truth, rays_to_the_turn, kRangeMax);
+    const std::vector<double> measured(turn.begin() + first,
+      turn.begin() + first + kSensorRays);
+
+    const std::vector<Pose> hypotheses{truth};
+
+    const std::expected<Result, Error> result =
+      localiser.localise(measured, kRangeMax, hypotheses, aperture, angle_min);
+
+    ASSERT_TRUE(result.has_value())
+      << "truth pose " << s << " on the " << grid.label << " grid, handed in "
+      << "as the one hypothesis, produced no pose at all.";
+
+    ASSERT_NEAR(result->pose.x, truth.x, cells * resolution)
+      << "truth pose " << s << " on the " << grid.label << " grid was placed "
+      << "elsewhere, so its heading says nothing about the reduction.";
+    ASSERT_NEAR(result->pose.y, truth.y, cells * resolution);
+
+    errors.push_back(FSM::Utils::wrapAngle(result->pose.t - truth.t));
+    each << " " << errors.back() * degrees;
+  }
+
+  const double lean =
+    std::accumulate(errors.begin(), errors.end(), 0.0) / errors.size();
+
+  EXPECT_LE(std::abs(lean) * degrees, bound * degrees)
+    << "a scan of " << kSensorRays << " rays over " << aperture * degrees
+    << " degrees, reduced to " << kReducedRays << ", leans " << lean * degrees
+    << " degrees on the " << grid.label << " grid, the poses one by one"
+    << each.str() << ". Reduced ray 0 is compared at " << compared * degrees
+    << " degrees and the sensor's first ray was taken at "
+    << angle_min * degrees << ", so a reduction that hands the one the "
+    << "other's range misplaces it by " << misplacement * degrees
+    << " degrees and the answer turns to match. The bound is half that, "
+    << bound * degrees << " degrees.";
 }
 
 TEST_P(LocaliserOnAFineGrid, APoseIsRecoveredFromAScanTheMapNeverCast)
@@ -1345,7 +1498,7 @@ TEST_P(LocaliserOnAFineGrid, APoseIsRecoveredFromAScanTheMapNeverCast)
     ASSERT_TRUE(map->isFree(truth.x, truth.y));
 
     const std::expected<Result, Error> result =
-      localiser.localise(scans[s], kRangeMax, kFullTurn);
+      localiser.localise(scans[s], kRangeMax, kFullTurn, -M_PI);
 
     ASSERT_TRUE(result.has_value())
       << "scan " << s << " on the " << grid.label << " grid produced no pose "
@@ -1403,7 +1556,7 @@ TEST_P(LocaliserOnEveryGrid, APoseIsRecoveredFromAScanTheMapItselfCast)
       map->ranges(truth, kRayCount, kRangeMax);
 
     const std::expected<Result, Error> result =
-      localiser.localise(measured, kRangeMax, kFullTurn);
+      localiser.localise(measured, kRangeMax, kFullTurn, -M_PI);
 
     ASSERT_TRUE(result.has_value())
       << "the measurement was cast from this very map at truth pose " << s
@@ -1495,7 +1648,7 @@ TEST_P(LocaliserOnEveryGrid, ATranslationBoundBelowACellSpendsTheRecoveryBudget)
   const Localiser generous(parametersOf(kTopK), map, freeSpaceOfMap(*map));
 
   const std::expected<Result, Error> control =
-    generous.localise(measured, kRangeMax, kFullTurn);
+    generous.localise(measured, kRangeMax, kFullTurn, -M_PI);
 
   ASSERT_TRUE(control.has_value())
     << "the control run, at the bound this package ships, produced no pose on "
@@ -1518,7 +1671,7 @@ TEST_P(LocaliserOnEveryGrid, ATranslationBoundBelowACellSpendsTheRecoveryBudget)
   const Localiser tight(bounded, map, freeSpaceOfMap(*map));
 
   const std::expected<Result, Error> result =
-    tight.localise(measured, kRangeMax, kFullTurn);
+    tight.localise(measured, kRangeMax, kFullTurn, -M_PI);
 
   const std::map<CorrectionError, unsigned int>& refusals =
     result.has_value() ? result->refusals : result.error().refusals;
@@ -1601,7 +1754,7 @@ TEST_P(ScanRefusalSeam, AScanRefusedHereIsRefusedByTheMatcherForTheSameThing)
   const std::vector<double> ranges(seam.rays, seam.range);
 
   const std::expected<Result, Error> library =
-    localiser.localise(ranges, kRangeMax, kFullTurn);
+    localiser.localise(ranges, kRangeMax, kFullTurn, -M_PI);
 
   ASSERT_FALSE(library.has_value())
     << "a scan of " << seam.rays << " rays, each of them " << seam.range

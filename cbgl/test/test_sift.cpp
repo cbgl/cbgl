@@ -318,7 +318,7 @@ TEST(Sift, ACandidateThatMetNothingIsRankedBehindEveryCandidateThatScored)
     freeSpaceOfTheRoom(*map));
 
   const std::expected<Result, Error> result =
-    localiser.localise(measured, rangeMax(), hypotheses, kFullTurn);
+    localiser.localise(measured, rangeMax(), hypotheses, kFullTurn, -M_PI);
 
   ASSERT_TRUE(result.has_value());
   ASSERT_EQ(result->survivors.size(), kTopK);
@@ -349,7 +349,7 @@ TEST(Sift, EveryCandidateSurvivesWhereTopKAsksForMoreThanExist)
     freeSpaceOfTheRoom(*map));
 
   const std::expected<Result, Error> result =
-    localiser.localise(measured, rangeMax(), hypotheses, kFullTurn);
+    localiser.localise(measured, rangeMax(), hypotheses, kFullTurn, -M_PI);
 
   ASSERT_TRUE(result.has_value());
 
@@ -386,7 +386,7 @@ TEST(Sift, TheRankingDoesNotDependOnTheNumberOfThreads)
       freeSpaceOfTheRoom(*map));
 
     const std::expected<Result, Error> result =
-      localiser.localise(measured, rangeMax(), hypotheses, kFullTurn);
+      localiser.localise(measured, rangeMax(), hypotheses, kFullTurn, -M_PI);
 
     ASSERT_TRUE(result.has_value())
       << "the search refused a run at " << threads << " threads that it "
@@ -455,7 +455,7 @@ TEST(Sift, TheSurvivorsAreTheCheapestCandidatesInRankingOrder)
     freeSpaceOfTheRoom(*map));
 
   const std::expected<Result, Error> result =
-    localiser.localise(measured, rangeMax(), hypotheses, kFullTurn);
+    localiser.localise(measured, rangeMax(), hypotheses, kFullTurn, -M_PI);
 
   ASSERT_TRUE(result.has_value());
 
@@ -523,7 +523,7 @@ TEST(Sift, TiedCandidatesAreNeitherLostNorDuplicated)
     freeSpaceOfTheRoom(*map));
 
   const std::expected<Result, Error> result =
-    localiser.localise(measured, rangeMax(), hypotheses, kFullTurn);
+    localiser.localise(measured, rangeMax(), hypotheses, kFullTurn, -M_PI);
 
   ASSERT_TRUE(result.has_value());
 

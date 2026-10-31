@@ -817,7 +817,7 @@ void Interface::localiseOnce(std_srvs::srv::Trigger::Response& outcome)
     static_cast<double>(scan->ranges.size()) * scan->angle_increment;
 
   const std::expected<Result, Error> result = localiser->localise(
-    upright.ranges, scan->range_max, hypotheses, aperture);
+    upright.ranges, scan->range_max, hypotheses, aperture, scan->angle_min);
 
   if (!result.has_value())
   {

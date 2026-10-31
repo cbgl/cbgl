@@ -79,16 +79,6 @@ Refinement correctedPosesOf(std::span<const ScoredPose> survivors,
 }
 
 /**
- * @brief The matcher's own encoding of "windowed" or "angular", from the
- * string a parameter set carries. `validate` has already refused anything
- * else, so there is no third case to report here.
- */
-FSM::RaySearch raySearchOf(const std::string& ray_search)
-{
-  return ray_search == "windowed" ? FSM::RaySearch::windowed : FSM::RaySearch::angular;
-}
-
-/**
  * @brief How many rays a cast must carry for a scan of `rays` rays spanning
  * `aperture` radians to be read against a full turn of map.
  * @details A sensor that sees all the way round is its own answer. One that
@@ -171,12 +161,36 @@ std::expected<Result, Error> unrefinedResult(std::vector<ScoredPose> scored,
  * @details Deciding a scan too short or entirely invalid here, before a single
  * hypothesis is drawn, is what keeps those two reasons from being reported as
  * "every survivor refused" once the same scan reaches the matcher survivor by
- * survivor. The reduction itself is the matcher's own, called directly rather
- * than copied, so that a scan reduced here and a scan reduced again inside
- * `fsm_localisation::Corrector::correct` agree once their lengths already do.
+ * survivor.
+ * Reduced ray `j` holds the scan read at the angle the window compares that
+ * ray at, `-pi + (prefix + j) * 2 * pi / panoramic` from the heading, with
+ * `panoramic` and `prefix` from `panoramicRaysOf` and `prefixOf`: the window
+ * the sift and the selection take, and the one the refinement takes by the
+ * same arithmetic in `fsm_localisation`. The sensor's ray `k` lies at
+ * `angle_min + k * aperture / n` for a scan of `n` rays, so that angle falls
+ * between two of the sensor's rays, and the range is interpolated linearly
+ * between them. No reduced ray is therefore compared at an angle other than
+ * the one its range was read at, whatever the ray count and the aperture.
+ * Missing readings are filled first, by the matcher's own
+ * `FSM::DatasetUtils::interpolateRanges`, as the reduction always filled them.
+ * A reduced ray read beside a filled reading blends its valid neighbour with
+ * the value that fill gave, which is what the reduction did before, and the
+ * reduced scan carries no zero.
+ * A reduced ray compared beyond the sensor's first or last ray is given the
+ * range of that end ray. Reducing 1073 rays a quarter of a degree apart to
+ * 269 compares reduced ray 0 at -134.127 degrees, where the first ray lies at
+ * -134.000, and no other reduced ray falls outside. Its misplacement is 0.127
+ * degrees on one ray of 269, which is 0.0005 degrees over the scan. Leaving it
+ * missing would not keep it out of the refinement:
+ * `fsm_localisation::Corrector::correct` fills a zero again from the rays
+ * either side of it, which for the first ray are the second and the last, so
+ * the refinement would read a range the sift never saw.
+ * @remark A scan already `size_scan` rays long is returned as it is, missing
+ * readings and all, and compared ray for ray where the window lays it.
  */
 std::expected<std::vector<double>, Error::Reason> reducedRanges(
-  std::span<const double> ranges, const Parameters& parameters)
+  std::span<const double> ranges, const Parameters& parameters,
+  const double aperture, const double angle_min)
 {
   const std::size_t target = parameters.matcher.size_scan == 0
     ? ranges.size() : parameters.matcher.size_scan;
@@ -194,8 +208,32 @@ std::expected<std::vector<double>, Error::Reason> reducedRanges(
   if (scan.size() == target)
     return scan;
 
-  return FSM::Utils::subsampleScan(FSM::DatasetUtils::interpolateRanges(scan),
-    target, raySearchOf(parameters.matcher.ray_search));
+  const std::vector<double> filled = FSM::DatasetUtils::interpolateRanges(scan);
+
+  const double increment = aperture / static_cast<double>(filled.size());
+  const double last = static_cast<double>(filled.size() - 1);
+
+  const std::size_t panoramic = panoramicRaysOf(target, aperture);
+  const std::size_t prefix = prefixOf(panoramic, target);
+
+  std::vector<double> reduced(target);
+
+  for (std::size_t j = 0; j < target; j++)
+  {
+    const double compared = -M_PI + 2.0 * M_PI *
+      static_cast<double>(prefix + j) / static_cast<double>(panoramic);
+
+    const double position =
+      std::clamp((compared - angle_min) / increment, 0.0, last);
+
+    const std::size_t below = static_cast<std::size_t>(std::floor(position));
+    const std::size_t above = std::min(below + 1, filled.size() - 1);
+    const double weight = position - static_cast<double>(below);
+
+    reduced[j] = filled[below] + weight * (filled[above] - filled[below]);
+  }
+
+  return reduced;
 }
 
 /**
@@ -442,7 +480,7 @@ std::vector<Pose> Localiser::disperse() const
  * @details The map's free space is checked before the scan is even reduced,
  * since it is a property of the map rather than of the scan and answering it
  * costs nothing. An empty hypothesis set is refused separately and by its own
- * reason, since the four argument overload exists precisely so a caller can
+ * reason, since the five argument overload exists precisely so a caller can
  * hand one in, and reporting it as the map having no free space would be
  * false on a map that plainly has some. The scan is then reduced exactly
  * once, by `reducedRanges`, and that single reduced scan is what the sift,
@@ -450,7 +488,7 @@ std::vector<Pose> Localiser::disperse() const
  */
 std::expected<Result, Error> Localiser::localise(std::span<const double> ranges,
   const double range_max, std::span<const Pose> hypotheses,
-  const double aperture) const
+  const double aperture, const double angle_min) const
 {
   if (free_space_.cells.empty())
     return std::unexpected(Error{
@@ -466,7 +504,7 @@ std::expected<Result, Error> Localiser::localise(std::span<const double> ranges,
     std::chrono::steady_clock::now();
 
   const std::expected<std::vector<double>, Error::Reason> reduced =
-    reducedRanges(ranges, parameters_);
+    reducedRanges(ranges, parameters_, aperture, angle_min);
 
   if (!reduced.has_value())
     return std::unexpected(Error{
@@ -528,10 +566,10 @@ std::expected<Result, Error> Localiser::localise(std::span<const double> ranges,
 }
 
 std::expected<Result, Error> Localiser::localise(std::span<const double> ranges,
-  const double range_max, const double aperture) const
+  const double range_max, const double aperture, const double angle_min) const
 {
   const std::vector<Pose> hypotheses = disperse();
-  return localise(ranges, range_max, hypotheses, aperture);
+  return localise(ranges, range_max, hypotheses, aperture, angle_min);
 }
 
 }

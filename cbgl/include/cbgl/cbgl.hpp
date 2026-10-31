@@ -170,7 +170,7 @@ struct Error
     map_has_no_free_space,
 
     /**
-     * @remark An extension beyond the written requirements. The four
+     * @remark An extension beyond the written requirements. The five
      * argument `Localiser::localise` exists so a caller can hand in a
      * hypothesis set of its own, and an empty one is neither the map having
      * no free space nor a draw this library made badly. Raised only there,
@@ -299,11 +299,20 @@ public:
    * resolution and comparing only the middle window of that cast. The rotation
    * that yields a candidate is still over the whole turn, so what a candidate
    * is labelled with does not change.
-   * @remark This carries no default, deliberately. A default of a whole turn
-   * would let a caller with a narrower sensor say nothing and be answered
-   * confidently and wrongly. That failure has happened once in this family
-   * already, one layer down, and a required parameter turns it into a compile
-   * error instead.
+   * @param angle_min the angle of the scan's first ray from the sensor's
+   * heading, in radians, as the scan reports it. The scan's rays are taken to
+   * lie `aperture` over their count apart, which is how the node computes the
+   * aperture. A scan reduced to fewer rays is read at the angles its reduced
+   * rays are compared at, and this is what places those angles among the
+   * sensor's own rays.
+   * @remark Neither `aperture` nor `angle_min` carries a default,
+   * deliberately. A default of a whole turn would let a caller with a narrower
+   * sensor say nothing and be answered confidently and wrongly. That failure
+   * has happened once in this family already, one layer down, and a required
+   * parameter turns it into a compile error instead. A default first angle
+   * would do the same by half a ray: a scan that begins half its span behind
+   * the heading and one whose middle ray points along the heading begin half a
+   * ray apart.
    * @remark Handing the set in rather than drawing it is what lets a test start
    * from a hypothesis set whose answer is known, and what lets two builds be
    * compared on everything downstream of the draw.
@@ -311,7 +320,8 @@ public:
   std::expected<Result, Error> localise(std::span<const double> ranges,
     double range_max,
     std::span<const Pose> hypotheses,
-    double aperture) const;
+    double aperture,
+    double angle_min) const;
 
   /**
    * @brief Localise from a hypothesis set of this localiser's own drawing.
@@ -320,7 +330,8 @@ public:
    */
   std::expected<Result, Error> localise(std::span<const double> ranges,
     double range_max,
-    double aperture) const;
+    double aperture,
+    double angle_min) const;
 
 private:
   const fsm_localisation::Corrector corrector_;

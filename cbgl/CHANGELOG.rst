@@ -4,6 +4,19 @@ Changelog for package cbgl
 
 Forthcoming
 -----------
+* Reads a scan reduced to fewer rays at the angles its reduced rays are
+  compared at. The reduction laid the scan over a whole turn whatever the
+  sensor covered, so for a sensor that does not see all the way round each
+  reduced ray held a range taken somewhere other than where it was compared.
+  Reducing 1073 rays a quarter of a degree apart to 269 compared reduced ray 0
+  at -134.127 degrees and gave it the range taken at -134.000. Each reduced ray
+  is now the scan interpolated between the two sensor rays either side of the
+  angle it is compared at, and one compared beyond the sensor's first or last
+  ray takes that ray's range. In the package's test room, averaged over three
+  poses, the answer leaned 0.153 degrees before and leans 0.018 now.
+  ``Localiser::localise`` takes the scan's first angle for this, with no
+  default, and the node passes the scan's own ``angle_min``. A scan already
+  ``size_scan`` rays long is read as before.
 * Lays the optional map scan over the scan the sensor reported, ray for ray.
   It was cast over a whole turn from half a turn behind the answer's heading,
   at the ray count the search was reduced onto, and published under the scan's
