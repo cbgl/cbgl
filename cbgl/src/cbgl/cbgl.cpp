@@ -157,7 +157,7 @@ std::expected<Result, Error> unrefinedResult(std::vector<ScoredPose> scored,
 
 /**
  * @brief The scan every stage of a run works from: exactly `size_scan` rays,
- * or the whole of `ranges` where `size_scan` is zero.
+ * or as many rays as `ranges` holds where `size_scan` is zero.
  * @details Deciding a scan too short or entirely invalid here, before a single
  * hypothesis is drawn, is what keeps those two reasons from being reported as
  * "every survivor refused" once the same scan reaches the matcher survivor by
@@ -169,8 +169,9 @@ std::expected<Result, Error> unrefinedResult(std::vector<ScoredPose> scored,
  * same arithmetic in `fsm_localisation`. The sensor's ray `k` lies at
  * `angle_min + k * aperture / n` for a scan of `n` rays, so that angle falls
  * between two of the sensor's rays, and the range is interpolated linearly
- * between them. No reduced ray is therefore compared at an angle other than
- * the one its range was read at, whatever the ray count and the aperture.
+ * between them. No reduced ray between the sensor's first and last rays is
+ * therefore compared at an angle other than the one its range was read at,
+ * whatever the ray count and the aperture.
  * Missing readings are filled first, by the matcher's own
  * `FSM::DatasetUtils::interpolateRanges`, as the reduction always filled them.
  * A reduced ray read beside a filled reading blends its valid neighbour with
