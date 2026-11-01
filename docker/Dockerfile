@@ -45,15 +45,9 @@ RUN rosdep update
 COPY --chown=${USER}:${USER} cbgl/cbgl/                        /home/${USER}/ros2_ws/src/cbgl/
 COPY --chown=${USER}:${USER} fsm-localisation/fsm_localisation/ /home/${USER}/ros2_ws/src/fsm_localisation/
 
-# libfftw3-dev is named directly because the libfftw3 rosdep key
-# resolves, through ros/rosdistro's rule for it, to libfftw3-3, a
-# package Ubuntu dropped in favour of one per floating point precision.
-# The same key is skipped below so resolving the rest of both
-# manifests does not fail looking for a package that is not there.
 RUN sudo apt-get -y update                                                  && \
-    sudo apt-get install -y --no-install-recommends libfftw3-dev libeigen3-dev && \
-    rosdep install --from-paths /home/${USER}/ros2_ws/src --ignore-src -r -y   \
-      --skip-keys "libfftw3"                                           && \
+    sudo apt-get install -y --no-install-recommends libeigen3-dev           && \
+    rosdep install --from-paths /home/${USER}/ros2_ws/src --ignore-src -r -y && \
     sudo rm -rf /var/lib/apt/lists/*
 
 # Both switches belong to fsm_localisation and cbgl follows whatever that

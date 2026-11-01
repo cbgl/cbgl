@@ -91,7 +91,7 @@ docker compose run --rm cbgl bash
 
 ### From source
 
-`fsm_localisation` must be in the same workspace. Everything else is declared in the manifests and `rosdep` fetches it, bar one key described below.
+`fsm_localisation` must be in the same workspace. Everything else is declared in the manifests and `rosdep` fetches it.
 
 ```sh
 mkdir -p ~/ros2_ws/src && cd ~/ros2_ws/src
@@ -99,12 +99,9 @@ git clone git@github.com:cbgl/cbgl.git
 git clone git@github.com:fourier-scan-matcher/fsm-localisation.git
 
 cd ~/ros2_ws
-sudo apt install libfftw3-dev
-rosdep install --from-paths src --ignore-src -r -y --skip-keys libfftw3
+rosdep install --from-paths src --ignore-src -r -y
 colcon build --packages-up-to cbgl
 ```
-
-`rosdep` needs `libfftw3` skipped because the key resolves through the upstream rules to a package Ubuntu dropped in favour of one per floating point precision, so `libfftw3-dev` is installed by name instead.
 
 Two build options exist for comparing builds rather than for running a robot. Both cost speed, both default off, and **both belong to `fsm_localisation` rather than to this package.** `FSM_LOCALISATION_EXACT_FP` builds at `-O2 -fno-fast-math -ffp-contract=off` instead of `-Ofast`, so that two compilers agree. `FSM_LOCALISATION_DETERMINISTIC_FFT` makes the matcher's transform plans chosen by heuristic rather than by timing, so that two runs agree.
 
