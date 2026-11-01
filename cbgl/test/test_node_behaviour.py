@@ -229,6 +229,13 @@ class TestNodeBehaviour(unittest.TestCase):
                          % len(self.poses))
         return self.poses[0]
 
+    def narrow_window(self):
+        """Return the middle NARROW_RAYS rays of the scan, and their spacing."""
+        prefix = (len(self.scan) - NARROW_RAYS) // 2
+        increment = 2.0 * math.pi / len(self.scan)
+
+        return self.scan[prefix:prefix + NARROW_RAYS], increment
+
     def test_1_the_answer_places_the_robot_where_the_scan_was_cast_from(self):
         pose = self.answer().pose.pose
         tolerance = CELLS * self.grid.resolution
@@ -284,9 +291,7 @@ class TestNodeBehaviour(unittest.TestCase):
         than cast afresh, so the two are the same measurement seen through two
         apertures and this case cannot pass by being an easier scan.
         """
-        prefix = (len(self.scan) - NARROW_RAYS) // 2
-        window = self.scan[prefix:prefix + NARROW_RAYS]
-        increment = 2.0 * math.pi / len(self.scan)
+        window, increment = self.narrow_window()
 
         self.assertEqual(len(window), NARROW_RAYS)
 
@@ -332,6 +337,68 @@ class TestNodeBehaviour(unittest.TestCase):
             msg='the robot faces %.4f radians and the node reported %.4f from '
                 'a scan covering three quarters of a turn'
                 % (self.expected[2], yaw_of(pose.orientation)))
+
+    def test_9_a_first_angle_a_whole_turn_away_gets_the_same_answer(self):
+        """
+        A narrower scan whose first angle is a turn on is the same scan.
+
+        The node checks a scan's first angle with whole turns taken off, so a
+        scan from 225 degrees passes as the scan from -135 degrees it is. The
+        localiser took the first angle as reported, and for a scan narrower
+        than a turn every angle the window compares then lay before the
+        sensor's first ray, so every compared ray was given that ray's range.
+
+        The window of the three quarter turn case is published to the same
+        node twice, from -135 degrees and from 225, and the two answers are
+        held to each other to the last bit. A scan whose rays lie on the
+        angles they are compared at is read as it is. 225 degrees rounded to
+        a 32 bit float, less a turn, lies 3.6e-6 of a ray from -135 degrees so
+        rounded, well inside the 4.3e-5 that test allows, so both runs search
+        the same scan from the same hypotheses.
+
+        Measured: with the first angle taken as reported, the two answers were
+        1.584 m and 29.60 degrees apart. With whole turns taken off it, they
+        are the same to the last bit.
+        """
+        window, increment = self.narrow_window()
+        first_ray_angle = -0.5 * NARROW_RAYS * increment
+
+        self.narrow.wait_for_connection()
+        self.narrow.publish_map(self.grid)
+        self.narrow.spin(1.0)
+
+        answers = []
+
+        for angle in (first_ray_angle, first_ray_angle + 2.0 * math.pi):
+            self.narrow.clear()
+            self.narrow.publish_scan(window, first_ray_angle=angle,
+                                     increment=increment)
+            self.narrow.spin(0.5)
+
+            response = self.narrow.call()
+            self.narrow.spin(1.0)
+
+            self.assertTrue(response.success, response.message)
+            self.assertEqual(
+                len(self.narrow.poses), 1,
+                'the call published %d poses where one was asked for'
+                % len(self.narrow.poses))
+
+            pose = self.narrow.poses[0].pose.pose
+            answers.append((pose.position.x, pose.position.y,
+                            yaw_of(pose.orientation)))
+
+        usual, turned = answers
+
+        self.assertEqual(
+            turned, usual,
+            'the scan from %.4f radians put the robot at (%r, %r, %r), and '
+            'the same scan from a whole turn on, %.4f radians, put it at '
+            '(%r, %r, %r): %.4f m and %.2f degrees away'
+            % ((first_ray_angle,) + usual + (first_ray_angle + 2.0 * math.pi,)
+               + turned
+               + (math.hypot(turned[0] - usual[0], turned[1] - usual[1]),
+                  math.degrees(abs(wrap(turned[2] - usual[2]))))))
 
     def test_2_the_answer_is_stamped_from_the_scan_that_produced_it(self):
         stamp = self.answer().header.stamp

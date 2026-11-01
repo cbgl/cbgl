@@ -167,6 +167,16 @@ std::expected<Result, Error> unrefinedResult(std::vector<ScoredPose> scored,
  * and it reads the mean of the rays at 179.5 and -179.5. No reduced ray of a
  * whole turn is therefore compared at an angle other than the one its range
  * was read at.
+ * A narrower scan whose first angle is reported a whole turn away is read as
+ * the same scan reported from the usual angle. Whole turns are taken off its
+ * first angle until its middle ray lies within half a turn of the heading,
+ * which is where the node measures a first angle from. Left as reported,
+ * every compared angle lies before the sensor's first ray and takes that
+ * ray's range: 270 rays a degree apart from 225 degrees would compare reduced
+ * ray `j` at sensor ray `j - 360`. A first angle whose middle ray already
+ * lies within half a turn of the heading is used as it is, to the bit. A
+ * whole turn is left as it is too, since the test below and the index into
+ * the scan take whole turns off it already.
  * A reduced ray of a narrower scan compared beyond the sensor's first or last
  * ray is given the range of that end ray. Reducing 1073 rays a quarter of a
  * degree apart to 269 compares reduced ray 0 at -134.127 degrees, where the
@@ -211,6 +221,10 @@ std::expected<std::vector<double>, Error::Reason> reducedRanges(
     return std::unexpected(Error::Reason::scan_entirely_invalid);
 
   const double increment = aperture / static_cast<double>(scan.size());
+  const bool whole_turn =
+    FSM::panoramicRaysOf(scan.size(), aperture) == scan.size();
+  const double first_angle = whole_turn ? angle_min : angle_min - 2.0 * M_PI *
+    std::round((angle_min + 0.5 * aperture) / (2.0 * M_PI));
 
   const std::size_t panoramic = FSM::panoramicRaysOf(target, aperture);
   const std::size_t prefix = FSM::windowPrefixOf(panoramic, target);
@@ -220,15 +234,13 @@ std::expected<std::vector<double>, Error::Reason> reducedRanges(
     const double compared = -M_PI + 2.0 * M_PI *
       static_cast<double>(prefix + j) / static_cast<double>(panoramic);
 
-    return (compared - angle_min) / increment;
+    return (compared - first_angle) / increment;
   };
 
   const double slack =
     2.0 * M_PI * std::numeric_limits<float>::epsilon() / increment;
   const double last = static_cast<double>(scan.size() - 1);
   const double rays = static_cast<double>(scan.size());
-  const bool whole_turn =
-    FSM::panoramicRaysOf(scan.size(), aperture) == scan.size();
 
   const auto wrappedOffset = [&](const double offset)
   {

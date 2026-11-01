@@ -4,6 +4,18 @@ Changelog for package cbgl
 
 Forthcoming
 -----------
+* Reads a scan narrower than a whole turn whose ``angle_min`` is reported a
+  whole turn away as the same scan reported from the usual angle. The node
+  checks a first angle with whole turns taken off and lets such a scan
+  through, but ``Localiser::localise`` took the angle as reported. Every
+  angle the window compares then lay before the sensor's first ray, and every
+  compared ray took that ray's range. Whole turns are now taken off the first
+  angle until the scan's middle ray lies within half a turn of the heading.
+  In the package's test room, 270 rays a degree apart from 225 degrees were
+  answered 1.584 m and 29.60 degrees from the same scan from -135 degrees,
+  and are now answered with the same pose to the last bit. A scan whose
+  middle ray already lies within half a turn of the heading, and every whole
+  turn, is read as before, to the bit.
 * Leaves a gap a gap in a scan already ``size_scan`` rays long whose rays lie
   off the angles they are compared at. Such a scan was filled across its gaps
   before it was read at those angles, so the sift compared ranges the sensor
