@@ -58,11 +58,14 @@
  * carries, and one matches it at its own count. Their tolerance is a third
  * one, on the heading alone, set by where the window compares the rays
  * against where they were taken, and each case sets it out.
- * **How a scan off its compared angles is read.** Two cases read the sampling
- * back through the sift's own score, from a reference that casts only what
- * the case is about. A whole turn is read between its last ray and its first
- * where it is compared between them, and a gap in a scan of `size_scan` rays
- * stays a gap, as it does in one whose rays lie on those angles.
+ * **How a scan off its compared angles is read.** Four cases read the
+ * sampling back through the sift's own score, from a reference that casts
+ * only what the case is about. A whole turn is read between its last ray and
+ * its first where it is compared between them, and one from plus pi as one
+ * from minus pi. A ray compared beyond the first ray takes that ray's range
+ * whether the ray beside it was measured or not. A gap in a scan of
+ * `size_scan` rays stays a gap, as it does in one whose rays lie on those
+ * angles.
  * **Every refusal.** All six: a map with no free space, an empty hypothesis
  * set, a scan shorter than the matcher asks for, a scan carrying no usable
  * range, a refinement that refused every survivor, and a pose the metric cannot
@@ -437,6 +440,21 @@ Parameters parametersOf(const unsigned int top_k_caers)
   return parameters;
 }
 
+/**
+ * @brief `rays` readings of `range` but for a run of `gap_rays` from ray
+ * `gap_begin` that the sensor did not measure.
+ */
+std::vector<double> rangesWithAGap(const std::size_t rays,
+  const double range, const std::size_t gap_begin,
+  const std::size_t gap_rays)
+{
+  std::vector<double> ranges(rays, range);
+  std::fill_n(ranges.begin() + gap_begin, gap_rays,
+    std::numeric_limits<double>::quiet_NaN());
+
+  return ranges;
+}
+
 GridFixture readGrid(const std::string& name)
 {
   std::ifstream file(fixturePath(name));
@@ -532,19 +550,21 @@ std::string seamCaseSuffix(const testing::TestParamInfo<SeamCase>& info)
 }
 
 /**
- * @brief What the sift makes of `measured`, a whole turn from `angle_min`,
- * from one pose that casts `cast`.
+ * @brief What the sift makes of `measured`, a scan over `aperture` from
+ * `angle_min`, from one pose that casts `cast`.
  * @details One orientation and no refinement, so the one survivor is the pose
  * itself and its score is the metric between `cast` and the scan as the sift
- * compared it.
+ * compared it. `size_scan` is nought, so the scan is compared at its own ray
+ * count.
  */
 std::expected<Result, Error> siftedFromOnePose(
   const std::vector<double>& measured, std::vector<double> cast,
-  const double angle_min)
+  const double aperture, const double angle_min)
 {
   Parameters parameters = parametersOf(1U);
   parameters.da = 1U;
   parameters.refine = false;
+  parameters.matcher.size_scan = 0U;
 
   const Pose standing{.x = 1.0, .y = 2.0, .t = 0.3};
 
@@ -558,7 +578,7 @@ std::expected<Result, Error> siftedFromOnePose(
 
   const std::vector<Pose> hypotheses{standing};
 
-  return localiser.localise(measured, kRangeMax, hypotheses, kFullTurn,
+  return localiser.localise(measured, kRangeMax, hypotheses, aperture,
     angle_min);
 }
 
@@ -632,16 +652,15 @@ TEST(Localiser, AGapInAFullLengthScanOffItsComparedAnglesStaysAGap)
   const std::size_t gap_begin = 100U;
   const std::size_t gap_rays = 40U;
 
-  std::vector<double> measured(kRayCount, 2.0);
-  std::fill_n(measured.begin() + gap_begin, gap_rays,
-    std::numeric_limits<double>::quiet_NaN());
+  const std::vector<double> measured =
+    rangesWithAGap(kRayCount, 2.0, gap_begin, gap_rays);
 
   const std::vector<double> cast(kRayCount, 1.0);
 
   const std::expected<Result, Error> on =
-    siftedFromOnePose(measured, cast, -M_PI);
+    siftedFromOnePose(measured, cast, kFullTurn, -M_PI);
   const std::expected<Result, Error> off =
-    siftedFromOnePose(measured, cast, -M_PI + 0.5 * increment);
+    siftedFromOnePose(measured, cast, kFullTurn, -M_PI + 0.5 * increment);
 
   ASSERT_TRUE(on.has_value());
   ASSERT_TRUE(off.has_value());
@@ -998,6 +1017,62 @@ TEST(Localiser, AnEmptyHypothesisSetIsRefusedForBeingEmpty)
 }
 
 /**
+ * @brief A ray compared beyond the sensor's first ray takes the first ray's
+ * range, whether the ray beside it was measured or not.
+ * @details
+ * **The scene.** The sensor of `kEvenSensorRays` rays `kSensorIncrement`
+ * apart, centred, so its first ray lies at -133.875 degrees. The window
+ * compares ray 0 at -134.000, beyond that first ray, so ray 0 is given the
+ * first ray's range and lies on it, the ray beside it carrying no weight. The
+ * sensor did not measure that second ray.
+ * **How it is read back.** Every ray of the scan reads 2 m but the second.
+ * The pose casts 1 m along compared ray 0 and nought along every other ray,
+ * which the metric skips. The sift's score is therefore 1 m where compared
+ * ray 0 reads the first ray, and the pose has no score at all where it reads
+ * missing.
+ * **The bound.** Compared ray 0 is the first ray's range and nothing else, so
+ * the score is 1 m exactly.
+ * **Both regimes, measured.** Where the ray beside it has to be measured for
+ * compared ray 0 to be read, though it carries no weight, ray 0 reads missing
+ * and the pose is refused as one the metric cannot grade. Where only the rays
+ * that carry weight have to be, the score is 1 m.
+ */
+TEST(Localiser, AnEndRayIsTakenWhenTheRayBesideItIsMissing)
+{
+  const double aperture = kEvenSensorRays * kSensorIncrement;
+  const double angle_min = -0.5 * (kEvenSensorRays - 1U) * kSensorIncrement;
+
+  const std::size_t panoramic =
+    FSM::panoramicRaysOf(kEvenSensorRays, aperture);
+  const std::size_t prefix = FSM::windowPrefixOf(panoramic, kEvenSensorRays);
+
+  const double first = 2.0;
+  const double compared = 1.0;
+
+  std::vector<double> measured(kEvenSensorRays, first);
+  measured[1] = std::numeric_limits<double>::quiet_NaN();
+
+  std::vector<double> cast(panoramic, 0.0);
+  cast[prefix] = compared;
+
+  const std::expected<Result, Error> result =
+    siftedFromOnePose(measured, cast, aperture, angle_min);
+
+  ASSERT_TRUE(result.has_value())
+    << "ray 0 of " << kEvenSensorRays << " rays from "
+    << angle_min * 180.0 / M_PI << " degrees is compared beyond the first "
+    << "ray and given its range, " << first << " m, but it read missing and "
+    << "the pose, which casts along ray 0 alone, could not be scored. The "
+    << "second ray was not measured and carries no weight in ray 0.";
+  ASSERT_EQ(result->survivors.size(), 1U);
+
+  EXPECT_EQ(result->survivors.front().score, first - compared)
+    << "ray 0 is compared beyond the first ray and given its range, "
+    << first << " m, against a cast of " << compared << " m, but it lies "
+    << result->survivors.front().score << " m from it.";
+}
+
+/**
  * @brief A pose the metric cannot grade is refused rather than reported, even
  * where the refinement accepted it.
  * @details This is the one refusal an occupancy grid cannot provoke, and it is
@@ -1323,6 +1398,66 @@ TEST(Localiser, AScanWithNoUsableRangeIsRefused)
 }
 
 /**
+ * @brief A whole turn whose first ray is reported at plus pi is read as the
+ * same turn reported from minus pi, the two being one angle.
+ * @details
+ * **The scene.** `kRayCount` rays a degree apart, every one reading 2 m but a
+ * run of forty that the sensor did not measure. The pose casts 1 m along
+ * every ray, so the sift's score is the number of rays it compared.
+ * **The two scans.** The same ranges twice, the first angle once minus pi and
+ * once plus pi, each rounded to a 32 bit float as a `sensor_msgs` scan
+ * carries it. The node takes the two for the same angle and lets both
+ * through. Every ray of either lies where the window compares the ray of the
+ * same index, a turn apart for the second.
+ * **The bound.** The two are one scan, so the sift compares the same rays of
+ * both: 320, the gap skipped.
+ * **Both regimes, measured.** Where the test of whether the rays lie on their
+ * compared angles does not wrap the turn, the scan from plus pi fails it by a
+ * whole turn and is read at its compared angles. Plus pi as a float lies
+ * 8.7e-8 radians beyond pi, so every compared ray falls just short of the
+ * sensor's ray of its index and reads the ray before it too. The gap grows by
+ * one ray and the scan is sifted over 319. With the turn wrapped, it is
+ * sifted over 320.
+ */
+TEST(Localiser, AWholeTurnFromPlusPiIsReadAsOneFromMinusPi)
+{
+  const std::size_t gap_begin = 100U;
+  const std::size_t gap_rays = 40U;
+
+  const std::vector<double> measured =
+    rangesWithAGap(kRayCount, 2.0, gap_begin, gap_rays);
+
+  const std::vector<double> cast(kRayCount, 1.0);
+
+  const double minus_pi = static_cast<float>(-M_PI);
+  const double plus_pi = static_cast<float>(M_PI);
+
+  const std::expected<Result, Error> from_minus =
+    siftedFromOnePose(measured, cast, kFullTurn, minus_pi);
+  const std::expected<Result, Error> from_plus =
+    siftedFromOnePose(measured, cast, kFullTurn, plus_pi);
+
+  ASSERT_TRUE(from_minus.has_value());
+  ASSERT_TRUE(from_plus.has_value());
+  ASSERT_EQ(from_minus->survivors.size(), 1U);
+  ASSERT_EQ(from_plus->survivors.size(), 1U);
+
+  const double minus_count = from_minus->survivors.front().score;
+  const double plus_count = from_plus->survivors.front().score;
+
+  ASSERT_EQ(minus_count, static_cast<double>(kRayCount - gap_rays))
+    << "the scan from minus pi reaches the sift as the sensor gave it, so the "
+    << "sift skips its " << gap_rays << " missing rays and compares the rest. "
+    << "Without that this case holds the other scan against nothing.";
+
+  EXPECT_EQ(plus_count, minus_count)
+    << "the scan from plus pi was sifted over " << plus_count << " rays, "
+    << "where the same scan from minus pi was sifted over " << minus_count
+    << ". A turn from plus pi lays every ray where the window compares the "
+    << "ray of its index, as a turn from minus pi does.";
+}
+
+/**
  * @brief A scan of a whole turn is read between its last ray and its first
  * where it is compared between them.
  * @details
@@ -1359,7 +1494,7 @@ TEST(Localiser, AWholeTurnIsReadBetweenItsLastRayAndItsFirst)
   cast.front() = mean;
 
   const std::expected<Result, Error> result =
-    siftedFromOnePose(measured, cast, angle_min);
+    siftedFromOnePose(measured, cast, kFullTurn, angle_min);
 
   ASSERT_TRUE(result.has_value())
     << "a scan every ray of which is usable, sifted from a pose that casts "

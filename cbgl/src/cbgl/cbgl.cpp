@@ -170,12 +170,14 @@ std::expected<Result, Error> unrefinedResult(std::vector<ScoredPose> scored,
  * is, missing readings and all, and compared ray for ray where the window lays
  * it. How far ray `j` lies from where it is compared grows linearly with `j`,
  * so only the first and the last ray are checked, each to within `2 * pi` times
- * the epsilon of a 32 bit float, 7.5e-7 radians. A scan carrying its angles as
- * 32 bit floats, as a `sensor_msgs` scan does, has its first angle rounded by
- * at most `pi` times half that epsilon and its last ray moved by at most three
- * times as much, both inside it. The 1073 rays a quarter of a degree apart from
- * -134 degrees that a real robot's sensor reports lie at most 1.4e-7 radians
- * off, and a whole turn from -pi lies off by nothing but that rounding. A
+ * the epsilon of a 32 bit float, 7.5e-7 radians. Those of a whole turn are
+ * checked with whole turns taken off, a ray turned by a whole turn lying
+ * where it lay. A scan carrying its angles as 32 bit floats, as a
+ * `sensor_msgs` scan does, has its first angle rounded by at most `pi` times
+ * half that epsilon and its last ray moved by at most three times as much,
+ * both inside it. The 1073 rays a quarter of a degree apart from -134 degrees
+ * that a real robot's sensor reports lie at most 1.4e-7 radians off, and a
+ * whole turn from -pi or from pi lies off by nothing but that rounding. A
  * centred scan of 1072 rays at that spacing lies half a ray, 2.2e-3 radians,
  * off, and is read at the angles its rays are compared at.
  */
@@ -212,17 +214,22 @@ std::expected<std::vector<double>, Error::Reason> reducedRanges(
   const double slack =
     2.0 * M_PI * std::numeric_limits<float>::epsilon() / increment;
   const double last = static_cast<double>(scan.size() - 1);
+  const double rays = static_cast<double>(scan.size());
+  const bool whole_turn =
+    FSM::panoramicRaysOf(scan.size(), aperture) == scan.size();
 
-  if (scan.size() == target && std::abs(positionOf(0)) <= slack &&
-      std::abs(positionOf(target - 1) - last) <= slack)
+  const auto wrappedOffset = [&](const double offset)
+  {
+    return whole_turn ? offset - rays * std::round(offset / rays) : offset;
+  };
+
+  if (scan.size() == target &&
+      std::abs(wrappedOffset(positionOf(0))) <= slack &&
+      std::abs(wrappedOffset(positionOf(target - 1) - last)) <= slack)
     return scan;
 
   const std::vector<double> readings = scan.size() == target
     ? scan : FSM::DatasetUtils::interpolateRanges(scan);
-
-  const double rays = static_cast<double>(scan.size());
-  const bool whole_turn =
-    FSM::panoramicRaysOf(scan.size(), aperture) == scan.size();
 
   std::vector<double> reduced(target);
 
@@ -239,7 +246,7 @@ std::expected<std::vector<double>, Error::Reason> reducedRanges(
     const double weight = position - floored;
 
     reduced[j] = fsm_localisation::isValidRange(readings[below]) &&
-        fsm_localisation::isValidRange(readings[above])
+        (weight == 0.0 || fsm_localisation::isValidRange(readings[above]))
       ? readings[below] + weight * (readings[above] - readings[below]) : 0.0;
   }
 

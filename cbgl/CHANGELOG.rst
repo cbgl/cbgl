@@ -21,7 +21,8 @@ Forthcoming
   any other two. 360 rays a degree apart from -179.5 degrees compared ray 0 at
   -180 degrees and gave it the range taken at -179.5. It now reads the mean of
   the rays taken at 179.5 and -179.5. A whole turn whose rays lie on the
-  angles they are compared at, as one from minus pi does, is read as before.
+  angles they are compared at, as one from minus pi or from plus pi does, is
+  read as before.
 * Refuses a scan whose ``angle_min`` or ``angle_increment`` is not finite,
   naming the field and the value it carried. The node's test of a scan's
   angles asked whether each was out by more than one ray, and every comparison
@@ -71,7 +72,7 @@ Forthcoming
   same room it leaned 0.140 degrees and leans 0.000 now. Where the rays do lie
   on those angles, to within what rounding the angles to 32 bit floats moves
   them by, the scan is read as before, missing readings and all. The 1073 rays
-  above lie there, as does every whole turn from minus pi.
+  above lie there, as does every whole turn from minus pi or from plus pi.
 * Lays the optional map scan over the scan the sensor reported, ray for ray.
   It was cast over a whole turn from half a turn behind the answer's heading,
   at the ray count the search was reduced onto, and published under the scan's
