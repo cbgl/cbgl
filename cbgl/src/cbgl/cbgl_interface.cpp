@@ -375,14 +375,14 @@ struct UprightScan
 UprightScan uprightScanOf(const sensor_msgs::msg::LaserScan& scan,
   const Pose& placement, const bool upside_down)
 {
-  const std::vector<double> ranges = rangesOf(scan);
-
   if (!upside_down)
   {
     return UprightScan{
       .sensor = placement,
-      .ranges = ranges};
+      .ranges = rangesOf(scan)};
   }
+
+  const std::vector<double> ranges = rangesOf(scan);
 
   const double rays = static_cast<double>(scan.ranges.size());
   const double skew =
