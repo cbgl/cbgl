@@ -4,6 +4,16 @@ Changelog for package cbgl
 
 Forthcoming
 -----------
+* Refuses a scan whose ``angle_min`` or ``angle_increment`` is not finite,
+  naming the field and the value it carried. The node's test of a scan's
+  angles asked whether each was out by more than one ray, and every comparison
+  with not a number is false. A first angle of not a number passed and was
+  turned into an index of the scan where it is sampled, which is undefined. In
+  the package's test room such a run was refused for a scan carrying no usable
+  range. A first angle of infinity passed as well and was answered with a
+  pose. An infinite spacing passed too, since it allows an infinite slack, and
+  the matcher then refused every survivor for an aperture no sensor can cover.
+  Each of the three is now refused by the node, before a hypothesis is drawn.
 * Tells the matcher where the first ray of the scan it refines lies, which
   ``fsm_localisation::Corrector::correct`` now requires, with no default. The
   scan it is given has been read at the angles the window compares it at, so

@@ -360,7 +360,7 @@ No pose is published for a refused run. Each reason is returned as a sentence in
 | no scan has arrived | the node |
 | the sensor's placement is not in the transform tree | the node |
 | a run is already under way | the node |
-| the scan is not centred on the sensor's heading, spans more than a full turn, or has an `angle_increment` that is not positive | the node |
+| the scan is not centred on the sensor's heading, spans more than a full turn, has an `angle_increment` that is not positive, or has an `angle_min` or `angle_increment` that is not finite | the node |
 | the map has no free space at all | the algorithm |
 | an empty hypothesis set was handed in | the algorithm |
 | the scan is shorter than `size_scan` | the algorithm |

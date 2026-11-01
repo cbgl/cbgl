@@ -24,10 +24,10 @@ Every run the node itself refuses, each provoked by its own missing precondition
 Five things the node decides on its own, before the library is asked anything:
 that no map has arrived, that no scan has arrived, that the transform tree does
 not say where the sensor sits on the robot, that the scan it holds does not span
-a turn the way the matcher's ray contract requires, and that a run is already
-under way. The library's own refusals, which are about the content of a map or a
-scan rather than about what the node has in hand, are reached by the library's
-own cases.
+a turn the way the matcher's ray contract requires or carries angles that are
+not finite, and that a run is already under way. The library's own refusals,
+which are about the content of a map or a scan rather than about what the node
+has in hand, are reached by the library's own cases.
 
 **Each case starves the node of one thing and of nothing else.** That is the
 whole design of this file, and it is not free. Reaching the right sentence is not
@@ -56,12 +56,13 @@ populated, and the one thing missing is the transform for that one frame.
 stop.** A refusal that cannot be made to go away proves nothing about what caused
 it. The map arrives and the same node answers; the scan arrives and the same node
 answers; the missing placement is published and the same node answers; a scan
-that does span the turn properly arrives and the same node answers; the run under
-way finishes and the same node answers the next request. Each of those second
-halves publishes exactly one thing, so what made the difference is not in
-question.
+that does span the turn properly, or whose angles are finite, arrives and the
+same node answers; the run under way finishes and the same node answers the
+next request. Each of those second halves publishes exactly one thing, so what
+made the difference is not in question.
 """
 
+import math
 import unittest
 
 from cbgl_test_support import (
@@ -84,6 +85,7 @@ import rclpy
 ASKEW = 'cbgl_askew'
 BUSY = 'cbgl_busy'
 MAPLESS = 'cbgl_mapless'
+NONFINITE = 'cbgl_nonfinite'
 SCANLESS = 'cbgl_scanless'
 UNPLACED = 'cbgl_unplaced'
 
@@ -109,6 +111,7 @@ def generate_test_description():
     nodes = {
         ASKEW: cbgl_node(ASKEW),
         MAPLESS: cbgl_node(MAPLESS),
+        NONFINITE: cbgl_node(NONFINITE),
         SCANLESS: cbgl_node(SCANLESS),
         UNPLACED: cbgl_node(UNPLACED),
         BUSY: cbgl_node(BUSY, dl=150.0, top_k_caers=1500, num_threads=1),
@@ -148,6 +151,7 @@ class TestEveryRefusalTheNodeDecides(unittest.TestCase):
         cls.askew = harness_for(ASKEW)
         cls.busy = harness_for(BUSY)
         cls.mapless = harness_for(MAPLESS)
+        cls.nonfinite = harness_for(NONFINITE)
         cls.scanless = harness_for(SCANLESS)
         cls.unplaced = harness_for(UNPLACED)
 
@@ -158,6 +162,7 @@ class TestEveryRefusalTheNodeDecides(unittest.TestCase):
         cls.askew.publish_map(cls.grid)
         cls.busy.publish_map(cls.grid)
         cls.mapless.publish_scan(cls.scan)
+        cls.nonfinite.publish_map(cls.grid)
         cls.scanless.publish_map(cls.grid)
         cls.unplaced.publish_map(cls.grid)
 
@@ -174,7 +179,8 @@ class TestEveryRefusalTheNodeDecides(unittest.TestCase):
     @classmethod
     def every_harness(cls):
         """Return every harness, one per node this launch carries."""
-        return (cls.askew, cls.busy, cls.mapless, cls.scanless, cls.unplaced)
+        return (cls.askew, cls.busy, cls.mapless, cls.nonfinite, cls.scanless,
+                cls.unplaced)
 
     @classmethod
     def tearDownClass(cls):
@@ -343,6 +349,53 @@ class TestEveryRefusalTheNodeDecides(unittest.TestCase):
 
         self.assert_answered(self.askew)
 
+    def test_a_scan_whose_angles_are_not_finite_is_refused_and_answered_once_they_are(self):
+        """
+        Refuse a scan whose first angle or spacing is not a finite number.
+
+        The node tests a scan's angles by asking whether each is out by more
+        than its slack, and every comparison with not a number is false. A
+        first angle of not a number passed, reached the sampling of the scan
+        and was turned into an index of it, which is undefined. The run was then
+        refused, for a scan carrying no usable range. A first angle of infinity
+        is not a number once it is wrapped onto a turn, so it passed too, and
+        the run was answered. An infinite spacing passed as well, since the
+        span it gives and the slack it allows are both infinite and infinity is
+        not more than infinity. The matcher then refused every survivor, for an
+        aperture no sensor can cover.
+
+        The node has a map, the tree carries the placement for the frame these
+        scans name, and each scan is present and carries one such angle with
+        every other field as a good scan carries it. Each refusal has to name
+        the field that carried the value. Then a scan with finite angles is
+        published to the same node and it answers, which shows that the
+        refusals were about the angles and not about the scan.
+        """
+        for field, value in (('angle_min', math.nan), ('angle_min', math.inf),
+                             ('angle_increment', math.inf)):
+            if field == 'angle_min':
+                self.nonfinite.publish_scan(self.scan, first_ray_angle=value)
+            else:
+                self.nonfinite.publish_scan(self.scan, increment=value)
+
+            self.nonfinite.spin(0.5)
+
+            message = self.assert_refused(
+                self.nonfinite, 'a scan whose %s is %r' % (field, value))
+
+            self.assertIn(
+                field, message,
+                'a scan whose %s is %r was refused without naming that field, '
+                'so whoever publishes it cannot tell what to correct: %s'
+                % (field, value, message))
+            self.assert_says_nothing_of(message, 'no map', 'no scan',
+                                        'transform tree')
+
+        self.nonfinite.publish_scan(self.scan)
+        self.nonfinite.spin(0.5)
+
+        self.assert_answered(self.nonfinite)
+
     def test_a_second_run_while_one_is_under_way_is_refused_and_answered_once_it_ends(self):
         """
         Refuse the second of two overlapping requests, then answer the next one.
@@ -399,8 +452,8 @@ class TestEveryRefusalTheNodeDecides(unittest.TestCase):
 class TestNodeShutdown(unittest.TestCase):
 
     def test_the_nodes_exited_cleanly(self, proc_info, cbgl_askew, cbgl_busy,
-                                      cbgl_mapless, cbgl_scanless,
-                                      cbgl_unplaced):
-        for process in (cbgl_askew, cbgl_busy, cbgl_mapless, cbgl_scanless,
-                        cbgl_unplaced):
+                                      cbgl_mapless, cbgl_nonfinite,
+                                      cbgl_scanless, cbgl_unplaced):
+        for process in (cbgl_askew, cbgl_busy, cbgl_mapless, cbgl_nonfinite,
+                        cbgl_scanless, cbgl_unplaced):
             launch_testing.asserts.assertExitCodes(proc_info, process=process)

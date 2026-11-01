@@ -59,6 +59,11 @@ namespace
  * though it agreed. One ray of slack is allowed, which is more than the
  * rounding of a float: a span or a first ray is refused only where it is out
  * by more than `angle_increment`.
+ * A first angle or a spacing that is not finite is refused too, by name.
+ * Every comparison with not a number is false, and an infinite spacing gives
+ * an infinite span and an infinite slack, so neither would fail the tests on
+ * the span and on the first ray. A first angle of not a number would then be
+ * turned into an index of the scan where it is sampled, which is undefined.
  * A scan spanning less than a turn is accepted. It was not before: this
  * package localised panoramic sensors and nothing else, and a narrower one was
  * refused here rather than answered wrongly. What supports it now is the
@@ -75,7 +80,7 @@ std::string anglesProblemOf(const sensor_msgs::msg::LaserScan& scan)
   const double slack = std::abs(increment) > 0.0
     ? std::abs(increment) : 2.0 * M_PI / std::max(1.0, rays);
 
-  if (!(increment > 0.0))
+  if (!(increment > 0.0) || !std::isfinite(increment))
   {
     return std::format("the scan carries angle_increment {}, which is not a "
       "spacing rays can be laid out at", increment);
@@ -92,7 +97,8 @@ std::string anglesProblemOf(const sensor_msgs::msg::LaserScan& scan)
 
   const double expected_min = -0.5 * aperture;
 
-  if (std::abs(FSM::Utils::wrapAngle(scan.angle_min - expected_min)) > slack)
+  if (!std::isfinite(scan.angle_min) ||
+    std::abs(FSM::Utils::wrapAngle(scan.angle_min - expected_min)) > slack)
   {
     return std::format("the scan carries angle_min {}, where a scan spanning "
       "{} radians is read as centred on the sensor's heading and therefore as "
