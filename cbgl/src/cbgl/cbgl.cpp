@@ -166,18 +166,18 @@ std::expected<Result, Error> unrefinedResult(std::vector<ScoredPose> scored,
  * the refinement would read a range the sift never saw.
  * @remark A scan already the length asked for, which every scan is where
  * `size_scan` is zero, is read at its compared angles unless its ray `j`
- * already lies where the window compares ray `j`. Such a scan is returned as it is, missing
- * readings and all, and compared ray for ray where the window lays it. How far
- * ray `j` lies from where it is compared grows linearly with `j`, so only the
- * first and the last ray are checked, each to within `2 * pi` times the
- * epsilon of a 32 bit float, 7.5e-7 radians. A scan carrying its angles as
+ * already lies where the window compares ray `j`. Such a scan is returned as it
+ * is, missing readings and all, and compared ray for ray where the window lays
+ * it. How far ray `j` lies from where it is compared grows linearly with `j`,
+ * so only the first and the last ray are checked, each to within `2 * pi` times
+ * the epsilon of a 32 bit float, 7.5e-7 radians. A scan carrying its angles as
  * 32 bit floats, as a `sensor_msgs` scan does, has its first angle rounded by
  * at most `pi` times half that epsilon and its last ray moved by at most three
- * times as much, both inside it. The 1073 rays a quarter of
- * a degree apart from -134 degrees that a real robot's sensor reports lie at
- * most 1.4e-7 radians off, and a whole turn from -pi lies off by nothing but
- * that rounding. A centred scan of 1072 rays at that spacing lies half a ray,
- * 2.2e-3 radians, off, and is read at the angles its rays are compared at.
+ * times as much, both inside it. The 1073 rays a quarter of a degree apart from
+ * -134 degrees that a real robot's sensor reports lie at most 1.4e-7 radians
+ * off, and a whole turn from -pi lies off by nothing but that rounding. A
+ * centred scan of 1072 rays at that spacing lies half a ray, 2.2e-3 radians,
+ * off, and is read at the angles its rays are compared at.
  */
 std::expected<std::vector<double>, Error::Reason> reducedRanges(
   std::span<const double> ranges, const Parameters& parameters,
