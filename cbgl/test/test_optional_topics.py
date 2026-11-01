@@ -36,9 +36,9 @@ dispersal draws round(density * free area) of them. Every hypothesis and every
 survivor is required to stand at the centre of a free cell of that same grid,
 which is what the dispersal draws and is a property of the fixture rather than
 of anything this file decides. The cast is required to be as long as the scan
-the sensor reported and to agree with the measurement to within a few cells,
-because a cast from where the answer says the sensor stood is what it claims to
-be.
+the sensor reported and to agree with the measurement to within two cells a
+ray on average, because a cast from where the answer says the sensor stood is
+what it claims to be.
 
 **The cast is laid over three more scans.** Two more nodes are launched, each on
 topics of its own so that what they are handed reaches nobody else. One takes
@@ -89,7 +89,7 @@ from rclpy.node import NodeNameNonExistentError
 from rclpy.serialization import deserialize_message, serialize_message
 from sensor_msgs.msg import LaserScan
 
-CELLS = 4.0
+ONE_RAY_BOUND = 0.0263
 OVERLAY_CELLS = 2.0
 
 HYPOTHESES_TOPIC = '/named/hypotheses'
@@ -177,6 +177,12 @@ def ray_differences(cast, measured):
     return [abs(cast_range - measured_range)
             for cast_range, measured_range in zip(cast, measured)
             if cast_range > 0.0 and measured_range > 0.0]
+
+
+def mean_difference(cast, measured):
+    """Return how far apart two scans are on average, where both measured."""
+    differences = ray_differences(cast, measured)
+    return sum(differences) / len(differences) if differences else math.inf
 
 
 class TestOptionalTopics(unittest.TestCase):
@@ -277,14 +283,13 @@ class TestOptionalTopics(unittest.TestCase):
         """
         Require the cast of one run to lie over its scan ray for ray.
 
-        The bound is two cells a ray on average, tighter than the panoramic
-        case's four cells twice over, because that bound separates nothing
-        here. Measured on this fixture, every run alike: a cast that lies over
+        The bound is two cells a ray on average, as the panoramic case's is.
+        Measured on this fixture, every run alike: a cast that lies over
         its scan disagrees with it by 0.0239 m upside down, 0.0249 m on the
         narrower scan and 0.0239 m on the reduced one. Before the cast was
         repaired the upside down one disagreed by 0.3108 m, being the mirror
         image of its scan, and the narrower one by 0.1907 m, being turned and
-        stretched, both inside 0.4 m. Two cells is 0.1 m.
+        stretched. Two cells is 0.1 m.
         """
         response, measured, casts = self.overlays[case]
 
@@ -294,9 +299,7 @@ class TestOptionalTopics(unittest.TestCase):
                          'was asked for' % (case, len(casts)))
 
         published = casts[0]
-        differences = ray_differences(published.ranges, measured.ranges)
-        disagreement = (sum(differences) / len(differences)
-                        if differences else math.inf)
+        disagreement = mean_difference(published.ranges, measured.ranges)
         bound = OVERLAY_CELLS * self.grid.resolution
 
         message = (
@@ -433,17 +436,15 @@ class TestOptionalTopics(unittest.TestCase):
         self.assertTrue(compared, 'the cast shares no usable ray with the '
                                   'measurement it is meant to be laid over')
 
-        bound = 2.0 * CELLS * self.grid.resolution
+        bound = OVERLAY_CELLS * self.grid.resolution
         disagreement = sum(compared) / len(compared)
 
         self.assertLess(
             disagreement, bound,
             'the cast disagrees with the measurement by %.4f metres a ray on '
-            'average, against a bound of %.4f. The answer stands within %g '
-            'cells of the truth and a cast into a raster disagrees with one '
-            'from the polygons of the same room by about a cell, so a cast '
-            'from where the answer says the sensor stood cannot be further '
-            'out than that twice over' % (disagreement, bound, CELLS))
+            'average, against a bound of %.4f. Measured on this fixture, the '
+            'cast from the answer disagrees by 0.0239 m and the same cast '
+            'mirrored by 0.3088 m' % (disagreement, bound))
 
     def test_5_the_map_scan_lies_over_a_sensor_mounted_upside_down(self):
         """
@@ -454,13 +455,32 @@ class TestOptionalTopics(unittest.TestCase):
         A cast taken from it counterclockwise and published in the rolled frame
         is drawn as the mirror image of what the sensor saw.
 
-        **What this does not catch, measured.** A cast taken clockwise from the
-        answer's heading, without the turn the upright sensor's heading carries,
-        is one ray out of turn on this scan. It disagrees with the scan by
-        0.0287 m a ray on average, where the right cast disagrees by 0.0239 m.
-        Both are well inside the bound, so this case cannot tell them apart.
+        **A cast one ray out of turn, measured.** A cast taken clockwise from
+        the answer's heading, without the turn the upright sensor's heading
+        carries, is one ray out of turn on this scan. Two cells cannot tell it
+        apart, so the cast is also held to 0.0263 m a ray on average, half way
+        between two figures measured on this fixture: the cast laid over its
+        scan disagrees with it by 0.0239 m, and the same cast turned by one ray
+        by 0.0287 m one way and 0.0338 m the other. The cast turned either way
+        is required to lie beyond the bound too, so a bound that no longer
+        separates the two fails here rather than passing a turned cast.
         """
         self.assert_laid_over('upside down')
+
+        _, measured, casts = self.overlays['upside down']
+        cast = list(casts[0].ranges)
+        laid = mean_difference(cast, measured.ranges)
+        turned = [mean_difference(ranges, measured.ranges)
+                  for ranges in (cast[1:] + cast[:1], cast[-1:] + cast[:-1])]
+
+        message = (
+            'the cast disagrees with its scan by %.4f metres a ray on '
+            'average, and turned by one ray either way by %.4f and %.4f, '
+            'against a bound of %.4f'
+            % (laid, turned[0], turned[1], ONE_RAY_BOUND))
+
+        self.assertLess(laid, ONE_RAY_BOUND, message)
+        self.assertGreater(min(turned), ONE_RAY_BOUND, message)
 
     def test_6_the_map_scan_lies_over_a_sensor_that_sees_less_than_a_turn(self):
         """
