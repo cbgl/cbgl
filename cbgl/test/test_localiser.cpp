@@ -106,23 +106,6 @@
  * cell sizes and so is its free area, so the same density draws the same number
  * of hypotheses at either resolution and the two cases differ in the map's
  * resolution and in nothing else.
- * **The other refinement.** Every case above refines a survivor by the matcher,
- * which is what a parameter set carrying no settings for the iterative closest
- * point solver asks for. Four cases carry a set for it instead, which is the
- * whole of how the second refinement is chosen, and they are what walks the
- * half of a run that lies downstream of the sift a second time: a pose
- * recovered from a hypothesis set the localiser drew, a hypothesis put three
- * cells along and two across from the truth and walked back onto it, the same
- * scan localised three times over for an answer that repeats to the last bit,
- * and a run whose every survivor that refinement refused. That last one is
- * where the two counts a result carries are told apart, a refusal of one
- * refinement being no fact at all about the other.
- * @remark Nothing here refines from two threads. The solver the second
- * refinement is built on keeps its context stack, its counters and every matrix
- * it has allocated in process globals and guards none of it, so two refinements
- * running at once can be handed each other's matrices. Its own header says so
- * of any two calls anywhere in the process rather than only of two on one
- * refiner.
  */
 
 #include <gtest/gtest.h>
@@ -177,15 +160,6 @@ const double kDensity = 15.0;
  */
 const double kRangeMax = 100.0;
 
-/**
- * @brief The minimum range the fixture's scans report from, nothing in them
- * being shorter than nought.
- * @details Handed to every localisation below. The cases that refine with the
- * matcher do not read it: the sift, the matcher and the selection each judge a
- * reading by the matcher's own test of it, which knows no lower bound. The
- * cases that refine by iterative closest point do read it, that refinement
- * marking a reading under it unusable rather than treating it as a distance.
- */
 const double kFullTurn = 2.0 * M_PI;
 
 /**
@@ -1310,23 +1284,6 @@ TEST(Localiser, AReferenceThatCastsNothingFromAFreePoseYieldsNoAnswer)
 }
 
 /**
- * @brief A scan carrying more rays than the matcher asks for is reduced to that
- * many, and the pose is still recovered.
- * @details Every other case here hands in exactly as many rays as `size_scan`
- * asks for, which leaves untouched the branch that interpolates a scan and
- * resamples it. A real sensor reports whatever it reports and the parameter
- * decides what the run works at, so that branch carries every run of a scan
- * finer than the setting.
- * The bound is the two cells of a scan the map itself cast, and it is the same
- * bound for the same reason: reducing a cast of twice as many rays onto this
- * many is the coarser cast itself. Ray `i` of `n` leaves a pose at
- * `i * 2*M_PI / n + pose.t - M_PI`, so ray `2 * j` of a cast of `2 * n` leaves
- * at `j * 2*M_PI / n + pose.t - M_PI`, which is ray `j` of the cast of `n`. The
- * two therefore differ by no more than the rounding of one of those
- * expressions against the other, and nothing about the search should notice
- * which of the two it was handed.
- */
-/**
  * @brief A scan carrying no rays at all is refused, and refused for its length.
  * @details The ROS 1 build read the first range of a scan before establishing
  * that the scan carried one, so a message with an empty range vector read
@@ -1362,6 +1319,23 @@ TEST(Localiser, AScanCarryingNoRaysAtAllIsRefused)
     << "suggest the rays were there and unusable.";
 }
 
+/**
+ * @brief A scan carrying more rays than the matcher asks for is reduced to that
+ * many, and the pose is still recovered.
+ * @details Every other case here over a whole turn hands in no more rays than
+ * `size_scan` asks for, which leaves untouched the branch that interpolates a
+ * scan and resamples it. A real sensor reports whatever it reports and the
+ * parameter decides what the run works at, so that branch carries every run
+ * of a scan finer than the setting.
+ * The bound is the two cells of a scan the map itself cast, and it is the same
+ * bound for the same reason: reducing a cast of twice as many rays onto this
+ * many is the coarser cast itself. Ray `i` of `n` leaves a pose at
+ * `i * 2*M_PI / n + pose.t - M_PI`, so ray `2 * j` of a cast of `2 * n` leaves
+ * at `j * 2*M_PI / n + pose.t - M_PI`, which is ray `j` of the cast of `n`. The
+ * two therefore differ by no more than the rounding of one of those
+ * expressions against the other, and nothing about the search should notice
+ * which of the two it was handed.
+ */
 TEST(Localiser, AScanOfMoreRaysThanTheMatcherAsksForIsReducedAndStillRecovers)
 {
   const GridFixture fixture = readGrid("pillar_room_grid_fine.csv");

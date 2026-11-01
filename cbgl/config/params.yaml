@@ -206,7 +206,7 @@
     # was refused as too short. The refusal named the ray count and never the
     # aperture, so the setting to change was not the one a reader would look
     # for. Nothing derives it, so shipping the value that needs no deriving is
-    # what makes a narrower sensor work out of the box.
+    # what keeps a narrower sensor from being refused for its ray count.
     #
     # Any other value reduces every scan to that many rays and refuses a scan
     # carrying fewer. Execution time rises faster than the ray count does, so

@@ -96,19 +96,21 @@ Forthcoming
   Reducing 1073 rays a quarter of a degree apart to 269 compared reduced ray 0
   at -134.127 degrees and gave it the range taken at -134.000. Each reduced ray
   is now the scan interpolated between the two sensor rays either side of the
-  angle it is compared at, and one compared beyond the sensor's first or last
-  ray takes that ray's range. In the package's test room, averaged over three
-  poses, the answer leaned 0.153 degrees before and leans 0.018 now.
-  ``Localiser::localise`` takes the scan's first angle for this, with no
-  default, and the node passes the scan's own ``angle_min``. A scan already
-  ``size_scan`` rays long, as every scan is with ``size_scan`` at ``0``, is
-  read the same way where its rays do not lie on the angles they are compared
-  at. A centred scan of 1072 rays a quarter of a degree apart has every ray
-  compared half a ray, 0.125 degrees, clockwise of where it was taken. In the
-  same room it leaned 0.140 degrees and leans 0.000 now. Where the rays do lie
-  on those angles, to within what rounding the angles to 32 bit floats moves
-  them by, the scan is read as before, missing readings and all. The 1073 rays
-  above lie there, as does every whole turn from minus pi or from plus pi.
+  angle it is compared at, and one of a scan narrower than a whole turn
+  compared beyond the sensor's first or last ray takes that ray's range. In
+  the package's test room, averaged over three poses, the answer leaned 0.153
+  degrees before and leans 0.018 now. ``Localiser::localise`` takes the
+  scan's first angle for this, with no default, and the node passes the
+  scan's own ``angle_min``. A scan already ``size_scan`` rays long, as every
+  scan is with ``size_scan`` at ``0``, is read the same way where its rays do
+  not lie on the angles they are compared at, but is not filled first, so a
+  gap in it stays a gap. A centred scan of 1072 rays a quarter of a degree
+  apart has every ray compared half a ray, 0.125 degrees, clockwise of where it
+  was taken. In the same room it leaned 0.140 degrees and leans 0.000 now.
+  Where the rays do lie on those angles, to within what rounding the angles to
+  32 bit floats moves them by, the scan is read as before, missing readings and
+  all. The 1073 rays above lie there, as does every whole turn from minus pi or
+  from plus pi.
 * Lays the optional map scan over the scan the sensor reported, ray for ray.
   It was cast over a whole turn from half a turn behind the answer's heading,
   at the ray count the search was reduced onto, and published under the scan's
