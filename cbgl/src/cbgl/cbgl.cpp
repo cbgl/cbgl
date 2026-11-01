@@ -140,12 +140,21 @@ std::expected<Result, Error> unrefinedResult(std::vector<ScoredPose> scored,
  * A reduced ray read beside a filled reading blends its valid neighbour with
  * the value that fill gave, which is what the reduction did before, and the
  * reduced scan carries no zero.
- * A reduced ray compared beyond the sensor's first or last ray is given the
- * range of that end ray. Reducing 1073 rays a quarter of a degree apart to
- * 269 compares reduced ray 0 at -134.127 degrees, where the first ray lies at
- * -134.000, and no other reduced ray falls outside. Its misplacement is 0.127
- * degrees on one ray of 269, which is 0.0005 degrees over the scan. Leaving it
- * missing would not keep it out of the refinement:
+ * A scan covering a whole turn, one whose ray count `FSM::panoramicRaysOf`
+ * leaves as it is, has no first or last ray in that sense. Its last ray and
+ * its first are neighbours a ray apart where the turn closes, as any two
+ * neighbours are, so a reduced ray compared between them is interpolated
+ * between them.
+ * 360 rays a degree apart from -179.5 degrees compare reduced ray 0 at -180,
+ * and it reads the mean of the rays at 179.5 and -179.5. No reduced ray of a
+ * whole turn is therefore compared at an angle other than the one its range
+ * was read at.
+ * A reduced ray of a narrower scan compared beyond the sensor's first or last
+ * ray is given the range of that end ray. Reducing 1073 rays a quarter of a
+ * degree apart to 269 compares reduced ray 0 at -134.127 degrees, where the
+ * first ray lies at -134.000, and no other reduced ray falls outside. Its
+ * misplacement is 0.127 degrees on one ray of 269, which is 0.0005 degrees
+ * over the scan. Leaving it missing would not keep it out of the refinement:
  * `fsm_localisation::Corrector::correct` fills a zero again from the rays
  * either side of it, which for the first ray are the second and the last, so
  * the refinement would read a range the sift never saw.
@@ -204,15 +213,23 @@ std::expected<std::vector<double>, Error::Reason> reducedRanges(
 
   const std::vector<double> filled = FSM::DatasetUtils::interpolateRanges(scan);
 
+  const double rays = static_cast<double>(scan.size());
+  const bool whole_turn =
+    FSM::panoramicRaysOf(scan.size(), aperture) == scan.size();
+
   std::vector<double> reduced(target);
 
   for (std::size_t j = 0; j < target; j++)
   {
-    const double position = std::clamp(positionOf(j), 0.0, last);
+    const double position = whole_turn
+      ? positionOf(j) : std::clamp(positionOf(j), 0.0, last);
 
-    const std::size_t below = static_cast<std::size_t>(std::floor(position));
-    const std::size_t above = std::min(below + 1, filled.size() - 1);
-    const double weight = position - static_cast<double>(below);
+    const double floored = std::floor(position);
+    const std::size_t below = static_cast<std::size_t>(
+      floored - rays * std::floor(floored / rays));
+    const std::size_t above = whole_turn
+      ? (below + 1) % scan.size() : std::min(below + 1, scan.size() - 1);
+    const double weight = position - floored;
 
     reduced[j] = filled[below] + weight * (filled[above] - filled[below]);
   }

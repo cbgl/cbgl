@@ -4,6 +4,14 @@ Changelog for package cbgl
 
 Forthcoming
 -----------
+* Reads a scan of a whole turn between its last ray and its first where a ray
+  is compared between them. A ray compared beyond the sensor's first or last
+  ray took that ray's range. That suits a sensor that does not see all the way
+  round, and not one that does, whose last and first rays are a ray apart like
+  any other two. 360 rays a degree apart from -179.5 degrees compared ray 0 at
+  -180 degrees and gave it the range taken at -179.5. It now reads the mean of
+  the rays taken at 179.5 and -179.5. A whole turn whose rays lie on the
+  angles they are compared at, as one from minus pi does, is read as before.
 * Refuses a scan whose ``angle_min`` or ``angle_increment`` is not finite,
   naming the field and the value it carried. The node's test of a scan's
   angles asked whether each was out by more than one ray, and every comparison

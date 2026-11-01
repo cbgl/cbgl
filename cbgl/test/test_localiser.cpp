@@ -58,6 +58,10 @@
  * carries, and one matches it at its own count. Their tolerance is a third
  * one, on the heading alone, set by where the window compares the rays
  * against where they were taken, and each case sets it out.
+ * **How a scan off its compared angles is read.** A case reads the sampling
+ * back through the sift's own score, from a reference that casts only along
+ * the rays the case is about: a whole turn is read between its last ray and
+ * its first where it is compared between them.
  * **Every refusal.** All six: a map with no free space, an empty hypothesis
  * set, a scan shorter than the matcher asks for, a scan carrying no usable
  * range, a refinement that refused every survivor, and a pose the metric cannot
@@ -130,6 +134,7 @@
 #include <ranges>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "cbgl/cbgl.hpp"
@@ -301,6 +306,40 @@ public:
   {
     return std::vector<double>(num_rays, 0.0);
   }
+};
+
+/**
+ * @brief A reference that calls every position free and casts the ranges it
+ * was built with, from whatever pose it is cast from.
+ * @details The sift scores a pose by the difference between the scan and the
+ * cast, summed over the rays where both are greater than zero. A cast of
+ * nought on every ray but those a case is about therefore makes the score a
+ * reading of those rays of the scan, as the sift compared them, and of
+ * nothing else.
+ * @remark `num_rays` and `max_range` are ignored. A case builds the cast at
+ * the ray count the window casts its own scan at.
+ */
+class FreeEverywhereCastingThese : public FSM::GridReference
+{
+public:
+  explicit FreeEverywhereCastingThese(std::vector<double> cast)
+  : cast_(std::move(cast))
+  {
+  }
+
+  bool isFree(const double, const double) const noexcept override
+  {
+    return true;
+  }
+
+  std::vector<double> ranges(const FSM::Pose&, const unsigned int,
+    const double) const override
+  {
+    return cast_;
+  }
+
+private:
+  const std::vector<double> cast_;
 };
 
 class LocaliserOnAFineGrid : public testing::TestWithParam<GridCase>
@@ -489,6 +528,37 @@ std::vector<Pose> readTruth(const std::string& name)
 std::string seamCaseSuffix(const testing::TestParamInfo<SeamCase>& info)
 {
   return info.param.label;
+}
+
+/**
+ * @brief What the sift makes of `measured`, a whole turn from `angle_min`,
+ * from one pose that casts `cast`.
+ * @details One orientation and no refinement, so the one survivor is the pose
+ * itself and its score is the metric between `cast` and the scan as the sift
+ * compared it.
+ */
+std::expected<Result, Error> siftedFromOnePose(
+  const std::vector<double>& measured, std::vector<double> cast,
+  const double angle_min)
+{
+  Parameters parameters = parametersOf(1U);
+  parameters.da = 1U;
+  parameters.refine = false;
+
+  const Pose standing{.x = 1.0, .y = 2.0, .t = 0.3};
+
+  FreeSpace free_space;
+  free_space.resolution = 0.05;
+  free_space.cells.push_back(Point{.x = standing.x, .y = standing.y});
+
+  const Localiser localiser(parameters,
+    std::make_shared<const FreeEverywhereCastingThese>(std::move(cast)),
+    free_space);
+
+  const std::vector<Pose> hypotheses{standing};
+
+  return localiser.localise(measured, kRangeMax, hypotheses, kFullTurn,
+    angle_min);
 }
 
 /**
@@ -1184,6 +1254,62 @@ TEST(Localiser, AScanWithNoUsableRangeIsRefused)
     << "match against anything.";
 
   EXPECT_EQ(result.error().reason, Error::Reason::scan_entirely_invalid);
+}
+
+/**
+ * @brief A scan of a whole turn is read between its last ray and its first
+ * where it is compared between them.
+ * @details
+ * **The scene.** `kRayCount` rays a degree apart from -179.5 degrees, half a
+ * ray off where the window compares them, so the scan is read at the angles
+ * it is compared at. Ray 0 is compared at -180 degrees, half way between the
+ * sensor's last ray, at 179.5, and its first, at -179.5. A sensor that does
+ * not see all the way round has an end there and nothing beyond it. A whole
+ * turn has no end: its last and first rays are a ray apart, as any two
+ * neighbours are.
+ * **How it is read back.** Every ray of the scan reads 2 m but the last,
+ * which reads 4 m. The pose casts 3 m along ray 0, the mean of the two, and
+ * nought along every other ray, which the metric skips. The sift's score is
+ * therefore how far the range compared at -180 degrees lies from that mean.
+ * **The bound.** Giving ray 0 the first ray's range alone puts it 1 m from
+ * the mean. The bound is half that.
+ * **Both regimes, measured.** With ray 0 given the first ray's range, as an
+ * end ray of a narrower sensor is, the score is 1 m. Read between the last
+ * ray and the first, it is 1.2e-14 m, the rounding of the angles.
+ */
+TEST(Localiser, AWholeTurnIsReadBetweenItsLastRayAndItsFirst)
+{
+  const double increment = kFullTurn / kRayCount;
+  const double angle_min = -M_PI + 0.5 * increment;
+
+  const double first = 2.0;
+  const double last = 4.0;
+  const double mean = 0.5 * (first + last);
+
+  std::vector<double> measured(kRayCount, first);
+  measured.back() = last;
+
+  std::vector<double> cast(kRayCount, 0.0);
+  cast.front() = mean;
+
+  const std::expected<Result, Error> result =
+    siftedFromOnePose(measured, cast, angle_min);
+
+  ASSERT_TRUE(result.has_value())
+    << "a scan every ray of which is usable, sifted from a pose that casts "
+    << "something along ray 0, produced no answer.";
+  ASSERT_EQ(result->survivors.size(), 1U);
+
+  const double bound = 0.5 * std::abs(mean - first);
+
+  EXPECT_LE(result->survivors.front().score, bound)
+    << "ray 0 of a whole turn from " << angle_min * 180.0 / M_PI
+    << " degrees is compared at -180 degrees, between the last ray, which "
+    << "reads " << last << " m, and the first, which reads " << first
+    << " m. It lies " << result->survivors.front().score << " m from their "
+    << "mean, " << mean << " m. Given the first ray's range alone it would "
+    << "lie " << std::abs(mean - first) << " m from it, as though the scan "
+    << "ended there. The bound is half that, " << bound << " m.";
 }
 
 TEST(Localiser, EveryLocalisationOfTheSameScanGivesTheSameAnswer)
