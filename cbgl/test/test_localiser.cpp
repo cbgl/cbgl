@@ -741,6 +741,10 @@ TEST(Localiser, AGapLeavesMissingOnlyTheComparedRaysBetweenItsNeighbours)
       const std::expected<Result, Error> result =
         siftedFromOnePose(measured, cast, aperture, angle_min);
 
+      ASSERT_TRUE(result.has_value())
+        << rays << " rays with a gap of " << gap_rays << " from first angle "
+        << angle_min << " were refused, so no compared ray was counted.";
+
       missing.push_back(static_cast<double>(rays) -
         result.value().survivors.front().score);
     }
