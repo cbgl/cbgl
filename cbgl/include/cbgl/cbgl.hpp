@@ -194,6 +194,14 @@ struct Error
      */
     no_scorable_pose,
 
+    /**
+     * @remark Raised for an aperture not above nought or not finite, or a
+     * first angle not finite, before the scan is read at a single angle. The
+     * node refuses such a scan first, so only a caller of `Localiser` that
+     * bypasses the node meets it.
+     */
+    scan_angles_invalid,
+
     scan_entirely_invalid,
 
     scan_too_short,

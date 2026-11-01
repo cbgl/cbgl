@@ -67,15 +67,16 @@
  * `size_scan` rays stays a gap, as it does in one whose rays lie on those
  * angles, and leaves missing no more compared rays than lie between the
  * measured rays either side of it.
- * **Every refusal.** All six: a map with no free space, an empty hypothesis
- * set, a scan shorter than the matcher asks for, a scan carrying no usable
- * range, a refinement that refused every survivor, and a pose the metric cannot
- * grade. A refinement that refused every survivor is reached by handing in
- * hypotheses that stand inside the room's own wall, which the matcher refuses
- * one by one for standing off free space, and the count it reports per reason
- * is asserted rather than merely the refusal. The ROS 1 build published a pose
- * in that case, read from index minus one of its own list of candidates.
- * **The sixth reason, and the reference it takes to reach it.** A run also
+ * **Every refusal.** All seven: a map with no free space, an empty hypothesis
+ * set, a scan whose angles no sensor reports, a scan shorter than the matcher
+ * asks for, a scan carrying no usable range, a refinement that refused every
+ * survivor, and a pose the metric cannot grade. A refinement that refused
+ * every survivor is reached by handing in hypotheses that stand inside the
+ * room's own wall, which the matcher refuses one by one for standing off free
+ * space, and the count it reports per reason is asserted rather than merely
+ * the refusal. The ROS 1 build published a pose in that case, read from index
+ * minus one of its own list of candidates.
+ * **The seventh reason, and the reference it takes to reach it.** A run also
  * refuses where the pose it would have reported cannot be graded by the metric
  * it is selected by. No occupancy grid can provoke that, for the reason
  * `AReferenceThatCastsNothingFromAFreePoseYieldsNoAnswer` sets out at length,
@@ -1456,6 +1457,76 @@ TEST(Localiser, AScanTheSeamHasNoBusinessRefusingIsRefusedByNeitherLayer)
   EXPECT_FALSE(matcher_called_it_unusable)
     << "the matcher refused a scan carrying one usable range as carrying none, "
     << "so the two layers no longer agree on what a usable range is.";
+}
+
+/**
+ * @brief A scan whose angles no sensor can report is refused, before it is
+ * read at a single angle.
+ * @details The node refuses each of these scans first. A caller handing a
+ * scan to the library directly passes no such gate, and the scan's first
+ * angle and aperture are what place every ray the scan is read at. A first
+ * angle not finite, or an aperture of nought or not a number, reaches an
+ * index of the scan through a conversion the language leaves undefined. A
+ * negative or an infinite aperture describes no sensor either.
+ * **Both regimes, measured.** Without the refusal, every one of the seven
+ * was refused as a run whose every survivor the matcher refused, which
+ * names the refinement and not the scan. With it, each is refused for its
+ * angles.
+ */
+TEST(Localiser, AScanWhoseAnglesNoSensorReportsIsRefused)
+{
+  const GridFixture fixture = readGrid("pillar_room_grid_coarse.csv");
+  const std::shared_ptr<const OccupancyGridMap> map = mapOf(fixture);
+  ASSERT_NE(map, nullptr);
+
+  const Localiser localiser(parametersOf(kTopK), map, freeSpaceOfMap(*map));
+
+  const std::vector<double> measured(kRayCount, 1.0);
+
+  const double not_a_number = std::numeric_limits<double>::quiet_NaN();
+  const double infinity = std::numeric_limits<double>::infinity();
+
+  struct Angles
+  {
+    const char* label{""};
+    double aperture{0.0};
+    double angle_min{0.0};
+  };
+
+  const Angles every[] = {
+    Angles{.label = "a first angle not a number", .aperture = kFullTurn,
+      .angle_min = not_a_number},
+    Angles{.label = "a first angle of plus infinity", .aperture = kFullTurn,
+      .angle_min = infinity},
+    Angles{.label = "a first angle of minus infinity", .aperture = kFullTurn,
+      .angle_min = -infinity},
+    Angles{.label = "an aperture of nought", .aperture = 0.0,
+      .angle_min = -M_PI},
+    Angles{.label = "a negative aperture", .aperture = -kFullTurn,
+      .angle_min = -M_PI},
+    Angles{.label = "an aperture not a number", .aperture = not_a_number,
+      .angle_min = -M_PI},
+    Angles{.label = "an infinite aperture", .aperture = infinity,
+      .angle_min = -M_PI}};
+
+  for (const Angles& angles : every)
+  {
+    const std::expected<Result, Error> result = localiser.localise(
+      measured, kRangeMax, angles.aperture, angles.angle_min);
+
+    const bool refused_for_its_angles = !result.has_value() &&
+      result.error().reason == Error::Reason::scan_angles_invalid;
+
+    const std::string outcome = result.has_value()
+      ? "answered with a pose"
+      : "refused for reason " +
+        std::to_string(static_cast<int>(result.error().reason));
+
+    EXPECT_TRUE(refused_for_its_angles)
+      << "a scan of " << kRayCount << " rays with " << angles.label << " was "
+      << outcome << ", where its angles describe no sensor and it is refused "
+      << "for them.";
+  }
 }
 
 TEST(Localiser, AScanWithNoUsableRangeIsRefused)

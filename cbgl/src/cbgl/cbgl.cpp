@@ -124,7 +124,11 @@ std::expected<Result, Error> unrefinedResult(std::vector<ScoredPose> scored,
  * @details Deciding a scan too short or entirely invalid here, before a single
  * hypothesis is drawn, is what keeps those two reasons from being reported as
  * "every survivor refused" once the same scan reaches the matcher survivor by
- * survivor.
+ * survivor. Angles no sensor reports are decided here too, and first. A
+ * first angle not finite, or an aperture of nought or not a number, would
+ * reach an index of the scan below through a conversion of not a number or
+ * infinity, which is undefined. A negative or an infinite aperture is refused
+ * with them, describing no sensor either.
  * Reduced ray `j` holds the scan read at the angle the window compares that
  * ray at, `-pi + (prefix + j) * 2 * pi / panoramic` from the heading, with
  * `panoramic` and `prefix` from `FSM::panoramicRaysOf` and
@@ -207,6 +211,10 @@ std::expected<std::vector<double>, Error::Reason> reducedRanges(
   std::span<const double> ranges, const Parameters& parameters,
   const double aperture, const double angle_min)
 {
+  if (!(aperture > 0.0) || !std::isfinite(aperture) ||
+      !std::isfinite(angle_min))
+    return std::unexpected(Error::Reason::scan_angles_invalid);
+
   const std::size_t target = parameters.matcher.size_scan == 0
     ? ranges.size() : parameters.matcher.size_scan;
 

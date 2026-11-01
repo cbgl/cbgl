@@ -4,6 +4,15 @@ Changelog for package cbgl
 
 Forthcoming
 -----------
+* Refuses, in ``Localiser::localise``, a scan whose aperture is not above
+  nought or not finite, or whose first angle is not finite, with the new
+  reason ``scan_angles_invalid``. The node refuses such a scan first, but a
+  caller of the library passes no such gate. For a first angle not finite,
+  or an aperture of nought or not a number, the sampling of the scan then
+  turned not a number or infinity into an index of the scan, which is
+  undefined. In the package's test room each of seven such cases was refused
+  as a run whose every survivor the matcher refused. Each is now refused for
+  its angles, before the scan is read.
 * Reads a scan narrower than a whole turn whose ``angle_min`` is reported a
   whole turn away as the same scan reported from the usual angle. The node
   checks a first angle with whole turns taken off and lets such a scan

@@ -334,6 +334,10 @@ std::string sentenceOf(const Error& error)
     case Error::Reason::no_scorable_pose:
       return "the map casts nothing from any refined pose, so none of them can "
         "be scored" + counts;
+    case Error::Reason::scan_angles_invalid:
+      return "the scan's aperture is not above nought or not finite, or its "
+        "angle_min is not finite, which the node's own gate on the scan "
+        "should have refused";
     case Error::Reason::scan_entirely_invalid:
       return "no range in the scan is usable";
     case Error::Reason::scan_too_short:
