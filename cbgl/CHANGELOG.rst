@@ -4,6 +4,15 @@ Changelog for package cbgl
 
 Forthcoming
 -----------
+* Reads a compared ray that lies within a rounding slack of one of the
+  sensor's rays from that ray alone. Computed in doubles, such an angle
+  carries a residue of either sign, and one towards a missing neighbour read
+  that neighbour too, so a gap left one or two rays more missing than its
+  own. 360 rays a degree apart from five rays past -180 degrees, with a gap
+  of forty, left 41 rays missing at 103 of 319 gap starts and 42 at 11, more
+  than the (m + 1) r, rounded up, that the sampling allows. Every gap now
+  leaves 40. The slack is the one that already decides whether a scan lies
+  on its compared angles, 2 pi times the epsilon of a 32 bit float.
 * Refuses, in ``Localiser::localise``, a scan whose aperture is not above
   nought or not finite, or whose first angle is not finite, with the new
   reason ``scan_angles_invalid``. The node refuses such a scan first, but a

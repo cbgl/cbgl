@@ -694,6 +694,66 @@ TEST(Localiser, AGapInAFullLengthScanOffItsComparedAnglesStaysAGap)
 }
 
 /**
+ * @brief A gap in a scan a whole number of rays off its compared angles
+ * leaves missing its own rays and no more.
+ * @details
+ * **The scene.** `kRayCount` rays a degree apart over a whole turn from five
+ * rays past -180 degrees, every one reading 2 m but a run of forty that the
+ * sensor did not measure. Every compared ray lies on a sensor's ray, five
+ * along. The pose casts 1 m along every ray, so the sift's score is the
+ * number of rays it compared. The gap starts at every ray from 1 to 319, so
+ * that the rays either side of it are measured.
+ * **Where they are compared.** Computed in doubles, a compared ray meant to
+ * lie on a sensor's ray carries a rounding residue of either sign. The one on
+ * ray 99 lies at 99.00000000000001, the one on ray 136 at 135.99999999999997
+ * and the one on ray 140 at 140 exactly. A residue towards a missing
+ * neighbour reads that neighbour too.
+ * **The bound.** Every compared ray lies on a sensor's ray, so a gap leaves
+ * missing its own forty rays, inside the `ceil((m + 1) * r)`, 41, that the
+ * sampling allows a gap of `m` rays at `r` of 1.
+ * **Both regimes, measured.** Read with the residue, 205 of the 319 gaps
+ * leave 40 rays missing, 103 leave 41 and 11 leave 42. Read with a compared
+ * ray that lies within the slack of a sensor's ray taken as on it, every gap
+ * leaves 40.
+ */
+TEST(Localiser, AGapInAScanTurnedByWholeRaysLeavesOnlyItsOwnRaysMissing)
+{
+  const double increment = kFullTurn / kRayCount;
+  const double angle_min = -M_PI + 5.0 * increment;
+  const std::size_t gap_rays = 40U;
+
+  const std::vector<double> cast(kRayCount, 1.0);
+
+  std::vector<double> missing;
+  for (std::size_t gap_begin = 1U; gap_begin + gap_rays < kRayCount;
+       gap_begin++)
+  {
+    const std::vector<double> measured =
+      rangesWithAGap(kRayCount, 2.0, gap_begin, gap_rays);
+
+    const std::expected<Result, Error> result =
+      siftedFromOnePose(measured, cast, kFullTurn, angle_min);
+
+    ASSERT_TRUE(result.has_value())
+      << kRayCount << " rays with a gap of " << gap_rays << " from ray "
+      << gap_begin << " were refused, so no compared ray was counted.";
+
+    missing.push_back(static_cast<double>(kRayCount) -
+      result.value().survivors.front().score);
+  }
+
+  const double most = std::ranges::max(missing);
+  const auto beyond = std::ranges::count_if(missing,
+    [gap_rays](const double count) { return count > gap_rays; });
+
+  EXPECT_EQ(most, static_cast<double>(gap_rays))
+    << "a gap of " << gap_rays << " rays left as many as " << most
+    << " compared rays missing, more than its own at " << beyond << " of "
+    << missing.size() << " gap starts. Every compared ray lies on a sensor's "
+    << "ray, so only those on the gap read missing.";
+}
+
+/**
  * @brief A gap in a scan of `size_scan` rays leaves missing no more compared
  * rays than lie strictly between the measured rays either side of it.
  * @details

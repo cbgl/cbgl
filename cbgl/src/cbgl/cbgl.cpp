@@ -138,7 +138,15 @@ std::expected<Result, Error> unrefinedResult(std::vector<ScoredPose> scored,
  * between two of the sensor's rays, and the range is interpolated linearly
  * between them. No reduced ray between the sensor's first and last rays is
  * therefore compared at an angle other than the one its range was read at,
- * whatever the ray count and the aperture.
+ * whatever the ray count and the aperture, but by a rounding slack. An angle
+ * within `2 * pi` times the epsilon of a 32 bit float of one of the sensor's
+ * rays, the slack the remark below gives, is taken to lie on that ray and
+ * reads it alone. Computed in doubles, an angle meant to lie on a ray carries
+ * a rounding residue of either sign, and a residue towards a missing
+ * neighbour would read that neighbour too. 360 rays a degree apart from five
+ * rays past -180 degrees place one compared ray 99.00000000000001 rays from
+ * the first and one 135.99999999999997 rays from it, so a gap of 36 rays
+ * between rays 99 and 136 left 38 reduced rays missing.
  * A scan reduced to fewer rays has its missing readings filled first, by the
  * matcher's own `FSM::DatasetUtils::interpolateRanges`, as the reduction
  * always filled them. A reduced ray read beside a filled reading blends its
@@ -267,8 +275,11 @@ std::expected<std::vector<double>, Error::Reason> reducedRanges(
 
   for (std::size_t j = 0; j < target; j++)
   {
-    const double position = whole_turn
+    const double placed = whole_turn
       ? positionOf(j) : std::clamp(positionOf(j), 0.0, last);
+    const double nearest = std::round(placed);
+    const double position =
+      std::abs(placed - nearest) <= slack ? nearest : placed;
 
     const double floored = std::floor(position);
     const std::size_t below = static_cast<std::size_t>(
