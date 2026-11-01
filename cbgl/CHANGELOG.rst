@@ -155,8 +155,8 @@ Forthcoming
   sensor covering three quarters of a turn carries 270 rays and was refused as
   too short, by a message that named the ray count and never the aperture. The
   aperture was always read from the scan; the ray count was not, and shipping
-  the value that needs no deriving is what makes such a sensor work with nothing
-  set.
+  the value that needs no deriving is what keeps such a sensor from being
+  refused for its ray count.
 * ``Localiser::localise`` no longer takes the scan's minimum range. It reached
   the solver alone and reaches nothing now. Its aperture argument carries no
   default either, for the reason the aperture repair records: a default of a

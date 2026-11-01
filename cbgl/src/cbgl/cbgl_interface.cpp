@@ -68,8 +68,8 @@ namespace
  * package localised panoramic sensors and nothing else, and a narrower one was
  * refused here rather than answered wrongly. What supports it now is the
  * window in the sift and in the refinement, which cast a whole turn at the
- * sensor's own angular resolution and compare only the part of it the sensor
- * could have seen.
+ * angular resolution of the scan they work from and compare only the part of
+ * it the sensor could have seen.
  * @return an empty string when the scan's angles are ones this can read,
  * otherwise a sentence naming the field and the value it carried.
  */

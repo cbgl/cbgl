@@ -421,9 +421,9 @@ TEST_P(RotationLabelling, TheRangesOfCandidateKAreAFreshCastAtTheOrientationItIs
  * changes nothing about the orientation a candidate is labelled with.
  * @details
  * A sensor that does not see all the way round is served by casting the whole
- * turn at that sensor's own angular resolution and keeping only the middle
- * window of it. The window is applied **after** the rotation, and this is the
- * case that pins that ordering.
+ * turn at the angular resolution of the scan it works from and keeping only
+ * the middle window of it. The window is applied **after** the rotation,
+ * and this is the case that pins that ordering.
  * Two things have to hold together and each would hide a fault in the other.
  * The orientation of candidate `k` has to be exactly what it is for a
  * panoramic sensor, because the rotation is over the whole turn either way and

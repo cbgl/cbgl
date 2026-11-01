@@ -86,14 +86,15 @@
  * occupancy grid comes is a map with nothing in range, which the matcher
  * refuses on its own first cast, and that is
  * `AMapWithNothingInRangeIsRefusedBeforeAnUnscorablePoseCanWin`.
- * **The matcher's five refusals, as a run through this library meets them.** A
+ * **The matcher's six refusals, as a run through this library meets them.** A
  * survivor standing off free space is reached by hypotheses inside the wall, a
  * first cast that met nothing by a map with nothing standing in it, and a spent
  * recovery budget by a translation bound smaller than the cell the refinement
- * has to cross. The remaining two, a scan too short and a scan carrying nothing
- * usable, cannot reach the matcher through this library at all, because the
- * library decides both before a hypothesis is drawn. They are pinned against
- * the matcher's own copies of the same two rules by `ScanRefusalSeam` and, from
+ * has to cross. The remaining three, a scan too short, a scan carrying nothing
+ * usable and an aperture no sensor can cover, cannot reach the matcher through
+ * this library at all, because the library decides all three before a
+ * hypothesis is drawn. The first two are pinned against the matcher's own
+ * copies of the same two rules by `ScanRefusalSeam` and, from
  * the other side of the boundary, by
  * `AScanTheSeamHasNoBusinessRefusingIsRefusedByNeitherLayer`.
  * **A measurement that carries no information.** A scan reading the sensor's

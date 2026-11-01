@@ -43,9 +43,10 @@ A drawn position is the centre of a free cell. On a map of twenty centimetre cel
 ### A sensor that does not see all the way round is supported, with one caveat
 
 This was a gap and is no longer one. The map is read all the way round at the
-sensor's own angular resolution, which is more readings than the sensor
-carries, and only the middle window of that is compared: the part of the turn
-the sensor could have seen. The rotation that yields a candidate is still over
+angular resolution of the scan the sift works from, the sensor's own where
+`size_scan` is 0, which is more readings than that scan carries, and only the
+middle window of that is compared: the part of the turn the
+sensor could have seen. The rotation that yields a candidate is still over
 the whole turn, so what a candidate is labelled with does not depend on the
 aperture.
 
