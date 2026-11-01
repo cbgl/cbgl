@@ -92,9 +92,10 @@
  * recovery budget by a translation bound smaller than the cell the refinement
  * has to cross. The remaining three, a scan too short, a scan carrying nothing
  * usable and an aperture no sensor can cover, cannot reach the matcher through
- * this library at all, because the library decides all three before a
- * hypothesis is drawn. The first two are pinned against the matcher's own
- * copies of the same two rules by `ScanRefusalSeam` and, from
+ * the node, because the node and this library decide all three before a
+ * hypothesis is drawn. A direct call to this library can still hand the
+ * matcher an aperture above a whole turn. The first two are pinned against the
+ * matcher's own copies of the same two rules by `ScanRefusalSeam` and, from
  * the other side of the boundary, by
  * `AScanTheSeamHasNoBusinessRefusingIsRefusedByNeitherLayer`.
  * **A measurement that carries no information.** A scan reading the sensor's

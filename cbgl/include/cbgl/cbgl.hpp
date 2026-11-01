@@ -197,8 +197,9 @@ struct Error
     /**
      * @remark Raised for an aperture not above nought or not finite, or a
      * first angle not finite, before the scan is read at a single angle. The
-     * node refuses such a scan first, so only a caller of `Localiser` that
-     * bypasses the node meets it.
+     * node refuses such a scan first, except one carrying no rays at all,
+     * whose aperture it computes as nought. That scan and a caller of
+     * `Localiser` that bypasses the node meet it.
      */
     scan_angles_invalid,
 
@@ -239,9 +240,10 @@ double caer(std::span<const double> measured, std::span<const double> cast,
  * does not divide `n`.
  * @param rays how many of the rotated cast a candidate keeps, counted from the
  * middle. Zero keeps the whole of it, which is what a sensor seeing all the
- * way round wants. A narrower sensor casts the whole turn at its own angular
- * resolution and keeps the middle window; the rotation is still over a full
- * turn, so the orientation a candidate carries is unaffected.
+ * way round wants. A narrower sensor casts the whole turn at the angular
+ * resolution of the scan it works from and keeps the middle window; the
+ * rotation is still over a full turn, so the orientation a candidate carries
+ * is unaffected.
  * @remark This is the whole of the saving the algorithm rests on: `da`
  * orientations of a position cost one cast between them.
  */
@@ -306,10 +308,10 @@ public:
    * nothing reports. The map has never seen it, so it is given per
    * localisation rather than held.
    * @param aperture how much of a turn the scan covers, in radians. A narrower
-   * sensor is served by casting the whole turn at the sensor's own angular
-   * resolution and comparing only the middle window of that cast. The rotation
-   * that yields a candidate is still over the whole turn, so what a candidate
-   * is labelled with does not change.
+   * sensor is served by casting the whole turn at the angular resolution of
+   * the scan it works from and comparing only the middle window of that cast.
+   * The rotation that yields a candidate is still over the whole turn, so
+   * what a candidate is labelled with does not change.
    * @param angle_min the angle of the scan's first ray from the sensor's
    * heading, in radians, as the scan reports it. The scan's rays are taken to
    * lie `aperture` over their count apart, which is how the node computes the

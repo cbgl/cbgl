@@ -363,7 +363,7 @@ No pose is published for a refused run. Each reason is returned as a sentence in
 | the scan is not centred on the sensor's heading, spans more than a full turn, has an `angle_increment` that is not positive, or has an `angle_min` or `angle_increment` that is not finite | the node |
 | the map has no free space at all | the algorithm |
 | an empty hypothesis set was handed in | the algorithm |
-| the scan's aperture is not above nought or not finite, or its `angle_min` is not finite, where the library is called without the node | the algorithm |
+| the scan's aperture is not above nought or not finite, or its `angle_min` is not finite: a scan carrying no rays at all, or the library called without the node | the algorithm |
 | the scan is shorter than `size_scan` | the algorithm |
 | the scan carries no usable range | the algorithm |
 | every survivor was refused by the matcher | the algorithm, naming how many were refused for each reason |

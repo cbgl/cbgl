@@ -336,8 +336,8 @@ std::string sentenceOf(const Error& error)
         "be scored" + counts;
     case Error::Reason::scan_angles_invalid:
       return "the scan's aperture is not above nought or not finite, or its "
-        "angle_min is not finite, which the node's own gate on the scan "
-        "should have refused";
+        "angle_min is not finite. A scan carrying no rays at all has an "
+        "aperture of nought";
     case Error::Reason::scan_entirely_invalid:
       return "no range in the scan is usable";
     case Error::Reason::scan_too_short:
