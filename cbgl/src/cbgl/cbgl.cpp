@@ -56,6 +56,10 @@ struct Refinement
  * @details Refinement is not asked to run concurrently, `top_k_caers` being
  * small enough that there is nothing to gain from splitting it the way the
  * sift is.
+ * `scan` is what `reducedRanges` gives, so its first ray lies where the window
+ * compares ray 0, `FSM::windowStartOf` of its ray count and `aperture`, and
+ * not at the sensor's `angle_min`. That is the angle the matcher is told its
+ * first ray lies at.
  */
 Refinement correctedPosesOf(std::span<const ScoredPose> survivors,
   std::span<const double> scan, const double range_max, const double aperture,
@@ -63,11 +67,13 @@ Refinement correctedPosesOf(std::span<const ScoredPose> survivors,
 {
   Refinement refinement;
 
+  const double first_ray_angle = FSM::windowStartOf(scan.size(), aperture);
+
   for (const ScoredPose& survivor : survivors)
   {
     const std::expected<fsm_localisation::CorrectionResult,
-      fsm_localisation::CorrectionError> result =
-      corrector.correct(scan, survivor.pose, range_max, aperture);
+      fsm_localisation::CorrectionError> result = corrector.correct(
+        scan, survivor.pose, range_max, aperture, first_ray_angle);
 
     if (result.has_value())
       refinement.corrected.push_back(result->corrected);

@@ -4,6 +4,13 @@ Changelog for package cbgl
 
 Forthcoming
 -----------
+* Tells the matcher where the first ray of the scan it refines lies, which
+  ``fsm_localisation::Corrector::correct`` now requires, with no default. The
+  scan it is given has been read at the angles the window compares it at, so
+  its first ray lies at ``FSM::windowStartOf`` of its ray count and the
+  aperture, not at the sensor's ``angle_min``, and that is the angle passed.
+  This needs an ``fsm_localisation`` whose matcher takes the argument, and an
+  older ``cbgl`` does not build against one that does.
 * Treats a reading below the scan's own ``range_min`` or above its own
   ``range_max`` as missing, exactly as it treats one that is not a number. By
   the ROS convention neither is a distance to anything, and both were read as
