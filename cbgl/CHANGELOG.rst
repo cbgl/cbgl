@@ -8,12 +8,18 @@ Forthcoming
   off the angles they are compared at. Such a scan was filled across its gaps
   before it was read at those angles, so the sift compared ranges the sensor
   never measured. The same scan with its rays on those angles is sifted with
-  its gaps skipped. A ray read from a missing reading is now missing too, so a
-  sensor a little off those angles treats a gap as one on them does, and the
-  gap grows by one ray at most. The matcher still fills gaps itself. A scan
-  reduced to fewer rays is still filled first. In a test of 360 rays with a
-  gap of forty, the scan half a ray off its angles was sifted over 360 rays
-  and is now sifted over 319, where the scan on its angles is sifted over 320.
+  its gaps skipped. A ray read from a missing reading, wholly or in part, is
+  now missing too, so a sensor a little off those angles treats a gap as one
+  on them does. A gap of m rays between two measured rays leaves at most
+  (m + 1) r rays missing, rounded up, where r is the sensor's spacing over the
+  compared spacing. The gap thus grows by one ray at most where the two
+  spacings agree, and by two at most where they do not. The matcher still
+  fills gaps itself. A scan reduced to fewer rays is still filled first. In a
+  test of 360 rays with a gap of forty, the scan half a ray off its angles was
+  sifted over 360 rays and is now sifted over 319, where the scan on its
+  angles is sifted over 320. 500 rays 2 pi / 999.6 apart are compared
+  2 pi / 1000 apart, and a gap of forty of them leaves 42 rays missing at 16
+  of a thousand first angles across one ray.
 * Reads a scan of a whole turn between its last ray and its first where a ray
   is compared between them. A ray compared beyond the sensor's first or last
   ray took that ray's range. That suits a sensor that does not see all the way

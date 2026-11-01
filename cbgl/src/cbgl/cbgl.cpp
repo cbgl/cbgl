@@ -141,11 +141,21 @@ std::expected<Result, Error> unrefinedResult(std::vector<ScoredPose> scored,
  * valid neighbour with the value that fill gave, which is what the reduction
  * did before, and such a reduced scan carries no zero.
  * A scan read at its own length is not filled. A ray of it read from a
- * missing reading is left missing, nought, as a scan returned as it is keeps
- * one. A gap therefore grows by one ray at most, the compared ray beside it
- * reading one ray of it, and the sift skips it as it skips the gap of a scan
- * whose rays lie on the angles they are compared at. The matcher fills both
- * alike.
+ * missing reading, one lying on that reading or between it and a neighbour,
+ * is left missing, nought, as a scan returned as it is keeps one. The sift
+ * skips it as it skips the gap of a scan whose rays lie on the angles they
+ * are compared at, and the matcher fills both alike. A gap of `m` rays
+ * between two measured readings therefore leaves missing the reduced rays
+ * that lie strictly between those two, `m + 1` of the sensor's spacings
+ * apart: at most `ceil((m + 1) * r)` of them, `r` being the sensor's
+ * spacing over the compared spacing. Where the two agree, `r` is 1 and the
+ * gap grows by one ray at most. Where they do not, `r` is the compared rays a
+ * turn holds over the sensor's rays it holds, which differ by a ray at most,
+ * and the gap grows by two rays at most. 500 rays `2 * pi / 999.6` apart are
+ * compared `2 * pi / 1000` apart, `r` is 1.0004, and a gap of 40 of them
+ * leaves 41 or 42 reduced rays missing. A gap at an end ray of a narrower
+ * scan also leaves missing every reduced ray compared beyond that end, each
+ * being given the end ray's range.
  * A scan covering a whole turn, one whose ray count `FSM::panoramicRaysOf`
  * leaves as it is, has no first or last ray in that sense. Its last ray and
  * its first are neighbours a ray apart where the turn closes, as any two

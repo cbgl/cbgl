@@ -58,14 +58,15 @@
  * carries, and one matches it at its own count. Their tolerance is a third
  * one, on the heading alone, set by where the window compares the rays
  * against where they were taken, and each case sets it out.
- * **How a scan off its compared angles is read.** Four cases read the
+ * **How a scan off its compared angles is read.** Five cases read the
  * sampling back through the sift's own score, from a reference that casts
  * only what the case is about. A whole turn is read between its last ray and
  * its first where it is compared between them, and one from plus pi as one
  * from minus pi. A ray compared beyond the first ray takes that ray's range
  * whether the ray beside it was measured or not. A gap in a scan of
  * `size_scan` rays stays a gap, as it does in one whose rays lie on those
- * angles.
+ * angles, and leaves missing no more compared rays than lie between the
+ * measured rays either side of it.
  * **Every refusal.** All six: a map with no free space, an empty hypothesis
  * set, a scan shorter than the matcher asks for, a scan carrying no usable
  * range, a refinement that refused every survivor, and a pose the metric cannot
@@ -638,9 +639,10 @@ Pose worldFromRoom(const OccupancyGridMap& map, const double origin_yaw,
  * gave it. From -179.5 every ray lies half a ray off, and the scan is read at
  * the angles it is compared at, each compared ray between two of the
  * sensor's.
- * **The bound.** The scan on its angles counts 320 rays, the gap skipped. A
- * compared ray of the other beside the gap reads one ray of the gap, so its
- * gap may grow by one ray and no more: it counts 319 or 320.
+ * **The bound.** The scan on its angles counts 320 rays, the gap skipped.
+ * The other is compared at the sensor's own spacing, and a compared ray of it
+ * beside the gap reads one ray of the gap, so its gap may grow by one ray and
+ * no more: it counts 319 or 320.
  * **Both regimes, measured.** With the gap filled before the scan is read at
  * its compared angles, the scan off them counts 360. Left a gap, it counts
  * 319.
@@ -685,8 +687,84 @@ TEST(Localiser, AGapInAFullLengthScanOffItsComparedAnglesStaysAGap)
   EXPECT_GE(off_count, on_count - 1.0)
     << "the scan half a ray off its compared angles was sifted over "
     << off_count << " rays, where the same ranges on those angles were sifted "
-    << "over " << on_count << ". A compared ray beside the gap reads one ray "
-    << "of it, so the gap grows by one ray at most.";
+    << "over " << on_count << ". At the sensor's own spacing a compared ray "
+    << "beside the gap reads one ray of it, so the gap grows by one ray at "
+    << "most.";
+}
+
+/**
+ * @brief A gap in a scan of `size_scan` rays leaves missing no more compared
+ * rays than lie strictly between the measured rays either side of it.
+ * @details
+ * **The scene.** Two sensors, each reading 2 m on every ray but a run of
+ * forty from ray 100 that it did not measure: `kRayCount` rays a degree apart
+ * over a whole turn, and 500 rays `2 * pi / 999.6` apart over a little more
+ * than half of one. The pose casts 1 m along every ray, so the sift's score
+ * is the number of rays it compared, and the rest are the rays left missing.
+ * Each is sifted from a thousand first angles across one of its rays, from
+ * half its span behind the heading on.
+ * **Where they are compared.** The window lays a whole number of rays round a
+ * turn: 360 at the first sensor's own spacing, and 1000 for the second, which
+ * it therefore compares `2 * pi / 1000` apart. The sensor's spacing over the
+ * compared spacing, `r`, is 1 for the first and 1000 / 999.6, 1.0004, for the
+ * second.
+ * **The bound.** A compared ray is missing where it lies on a missing reading
+ * or between one and its neighbour, so where it lies strictly between the
+ * measured rays either side of the gap, 41 of the sensor's spacings apart. At
+ * most `ceil(41 * r)` compared rays lie there: 41 for the first sensor, one
+ * more than the gap, and 42 for the second.
+ * **Both regimes, measured.** Held to 41, the first sensor passes at every
+ * first angle and the second fails at 16 of the thousand, where it leaves 42
+ * compared rays missing. Held to `ceil(41 * r)`, both pass.
+ */
+TEST(Localiser, AGapLeavesMissingOnlyTheComparedRaysBetweenItsNeighbours)
+{
+  const std::size_t gap_begin = 100U;
+  const std::size_t gap_rays = 40U;
+  const std::size_t first_angles = 1000U;
+
+  const auto expectTheBound = [&](const std::size_t rays, const double turn)
+  {
+    const double increment = kFullTurn / turn;
+    const double aperture = static_cast<double>(rays) * increment;
+
+    const std::vector<double> measured =
+      rangesWithAGap(rays, 2.0, gap_begin, gap_rays);
+    const std::vector<double> cast(FSM::panoramicRaysOf(rays, aperture), 1.0);
+
+    std::vector<double> missing;
+    for (std::size_t k = 0U; k < first_angles; k++)
+    {
+      const double angle_min = -0.5 * aperture + increment *
+        static_cast<double>(k) / static_cast<double>(first_angles);
+
+      const std::expected<Result, Error> result =
+        siftedFromOnePose(measured, cast, aperture, angle_min);
+
+      missing.push_back(static_cast<double>(rays) -
+        result.value().survivors.front().score);
+    }
+
+    const double ratio = std::round(turn) / turn;
+    const double bound =
+      std::ceil(static_cast<double>(gap_rays + 1U) * ratio);
+
+    const double most = std::ranges::max(missing);
+    const auto beyond = std::ranges::count_if(missing,
+      [bound](const double count) { return count > bound; });
+
+    EXPECT_LE(most, bound)
+      << rays << " rays, " << turn << " to the turn, with a gap of "
+      << gap_rays << " left as many as " << most << " compared rays missing, "
+      << "more than " << bound << " at " << beyond << " of " << first_angles
+      << " first angles. The measured rays either side of the gap are "
+      << gap_rays + 1U << " of the sensor's spacings apart, and at "
+      << ratio << " of the sensor's spacing over the compared spacing at "
+      << "most " << bound << " compared rays lie between them.";
+  };
+
+  expectTheBound(kRayCount, kRayCount);
+  expectTheBound(500U, 999.6);
 }
 
 TEST(Localiser, AHypothesisSetHandedInIsTheSetTheSearchUses)
