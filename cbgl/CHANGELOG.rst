@@ -4,6 +4,16 @@ Changelog for package cbgl
 
 Forthcoming
 -----------
+* Leaves a gap a gap in a scan already ``size_scan`` rays long whose rays lie
+  off the angles they are compared at. Such a scan was filled across its gaps
+  before it was read at those angles, so the sift compared ranges the sensor
+  never measured. The same scan with its rays on those angles is sifted with
+  its gaps skipped. A ray read from a missing reading is now missing too, so a
+  sensor a little off those angles treats a gap as one on them does, and the
+  gap grows by one ray at most. The matcher still fills gaps itself. A scan
+  reduced to fewer rays is still filled first. In a test of 360 rays with a
+  gap of forty, the scan half a ray off its angles was sifted over 360 rays
+  and is now sifted over 319, where the scan on its angles is sifted over 320.
 * Reads a scan of a whole turn between its last ray and its first where a ray
   is compared between them. A ray compared beyond the sensor's first or last
   ray took that ray's range. That suits a sensor that does not see all the way

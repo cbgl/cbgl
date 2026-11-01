@@ -135,11 +135,17 @@ std::expected<Result, Error> unrefinedResult(std::vector<ScoredPose> scored,
  * between them. No reduced ray between the sensor's first and last rays is
  * therefore compared at an angle other than the one its range was read at,
  * whatever the ray count and the aperture.
- * Missing readings are filled first, by the matcher's own
- * `FSM::DatasetUtils::interpolateRanges`, as the reduction always filled them.
- * A reduced ray read beside a filled reading blends its valid neighbour with
- * the value that fill gave, which is what the reduction did before, and the
- * reduced scan carries no zero.
+ * A scan reduced to fewer rays has its missing readings filled first, by the
+ * matcher's own `FSM::DatasetUtils::interpolateRanges`, as the reduction
+ * always filled them. A reduced ray read beside a filled reading blends its
+ * valid neighbour with the value that fill gave, which is what the reduction
+ * did before, and such a reduced scan carries no zero.
+ * A scan read at its own length is not filled. A ray of it read from a
+ * missing reading is left missing, nought, as a scan returned as it is keeps
+ * one. A gap therefore grows by one ray at most, the compared ray beside it
+ * reading one ray of it, and the sift skips it as it skips the gap of a scan
+ * whose rays lie on the angles they are compared at. The matcher fills both
+ * alike.
  * A scan covering a whole turn, one whose ray count `FSM::panoramicRaysOf`
  * leaves as it is, has no first or last ray in that sense. Its last ray and
  * its first are neighbours a ray apart where the turn closes, as any two
@@ -159,8 +165,8 @@ std::expected<Result, Error> unrefinedResult(std::vector<ScoredPose> scored,
  * either side of it, which for the first ray are the second and the last, so
  * the refinement would read a range the sift never saw.
  * @remark A scan already the length asked for, which every scan is where
- * `size_scan` is zero, is read the same way unless its ray `j` already lies
- * where the window compares ray `j`. Such a scan is returned as it is, missing
+ * `size_scan` is zero, is read at its compared angles unless its ray `j`
+ * already lies where the window compares ray `j`. Such a scan is returned as it is, missing
  * readings and all, and compared ray for ray where the window lays it. How far
  * ray `j` lies from where it is compared grows linearly with `j`, so only the
  * first and the last ray are checked, each to within `2 * pi` times the
@@ -211,7 +217,8 @@ std::expected<std::vector<double>, Error::Reason> reducedRanges(
       std::abs(positionOf(target - 1) - last) <= slack)
     return scan;
 
-  const std::vector<double> filled = FSM::DatasetUtils::interpolateRanges(scan);
+  const std::vector<double> readings = scan.size() == target
+    ? scan : FSM::DatasetUtils::interpolateRanges(scan);
 
   const double rays = static_cast<double>(scan.size());
   const bool whole_turn =
@@ -231,7 +238,9 @@ std::expected<std::vector<double>, Error::Reason> reducedRanges(
       ? (below + 1) % scan.size() : std::min(below + 1, scan.size() - 1);
     const double weight = position - floored;
 
-    reduced[j] = filled[below] + weight * (filled[above] - filled[below]);
+    reduced[j] = fsm_localisation::isValidRange(readings[below]) &&
+        fsm_localisation::isValidRange(readings[above])
+      ? readings[below] + weight * (readings[above] - readings[below]) : 0.0;
   }
 
   return reduced;

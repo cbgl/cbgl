@@ -58,10 +58,11 @@
  * carries, and one matches it at its own count. Their tolerance is a third
  * one, on the heading alone, set by where the window compares the rays
  * against where they were taken, and each case sets it out.
- * **How a scan off its compared angles is read.** A case reads the sampling
- * back through the sift's own score, from a reference that casts only along
- * the rays the case is about: a whole turn is read between its last ray and
- * its first where it is compared between them.
+ * **How a scan off its compared angles is read.** Two cases read the sampling
+ * back through the sift's own score, from a reference that casts only what
+ * the case is about. A whole turn is read between its last ray and its first
+ * where it is compared between them, and a gap in a scan of `size_scan` rays
+ * stays a gap, as it does in one whose rays lie on those angles.
  * **Every refusal.** All six: a map with no free space, an empty hypothesis
  * set, a scan shorter than the matcher asks for, a scan carrying no usable
  * range, a refinement that refused every survivor, and a pose the metric cannot
@@ -602,6 +603,71 @@ Pose worldFromRoom(const OccupancyGridMap& map, const double origin_yaw,
     .t = fmod(room.t + origin_yaw + 5*M_PI, 2*M_PI) - M_PI};
 }
 
+}
+
+/**
+ * @brief A gap in a scan of `size_scan` rays is skipped by the sift whether
+ * the scan's rays lie on the angles they are compared at or off them.
+ * @details
+ * **The scene.** `kRayCount` rays over a whole turn, every one reading 2 m but
+ * a run of forty that the sensor did not measure. The pose casts 1 m along
+ * every ray, so every ray the metric counts adds exactly a metre, and the
+ * sift's score is the number of rays it compared.
+ * **The two scans.** The same ranges twice. From -180 degrees every ray lies
+ * where the window compares it, and the scan reaches the sift as the sensor
+ * gave it. From -179.5 every ray lies half a ray off, and the scan is read at
+ * the angles it is compared at, each compared ray between two of the
+ * sensor's.
+ * **The bound.** The scan on its angles counts 320 rays, the gap skipped. A
+ * compared ray of the other beside the gap reads one ray of the gap, so its
+ * gap may grow by one ray and no more: it counts 319 or 320.
+ * **Both regimes, measured.** With the gap filled before the scan is read at
+ * its compared angles, the scan off them counts 360. Left a gap, it counts
+ * 319.
+ */
+TEST(Localiser, AGapInAFullLengthScanOffItsComparedAnglesStaysAGap)
+{
+  const double increment = kFullTurn / kRayCount;
+
+  const std::size_t gap_begin = 100U;
+  const std::size_t gap_rays = 40U;
+
+  std::vector<double> measured(kRayCount, 2.0);
+  std::fill_n(measured.begin() + gap_begin, gap_rays,
+    std::numeric_limits<double>::quiet_NaN());
+
+  const std::vector<double> cast(kRayCount, 1.0);
+
+  const std::expected<Result, Error> on =
+    siftedFromOnePose(measured, cast, -M_PI);
+  const std::expected<Result, Error> off =
+    siftedFromOnePose(measured, cast, -M_PI + 0.5 * increment);
+
+  ASSERT_TRUE(on.has_value());
+  ASSERT_TRUE(off.has_value());
+  ASSERT_EQ(on->survivors.size(), 1U);
+  ASSERT_EQ(off->survivors.size(), 1U);
+
+  const double on_count = on->survivors.front().score;
+  const double off_count = off->survivors.front().score;
+
+  ASSERT_EQ(on_count, static_cast<double>(kRayCount - gap_rays))
+    << "the scan whose rays lie on their compared angles reaches the sift as "
+    << "the sensor gave it, so the sift skips its " << gap_rays << " missing "
+    << "rays and compares the rest. Without that this case holds the other "
+    << "scan against nothing.";
+
+  EXPECT_LE(off_count, on_count)
+    << "the scan half a ray off its compared angles was sifted over "
+    << off_count << " rays, where the same ranges on those angles were sifted "
+    << "over " << on_count << ". Its gap of " << gap_rays << " rays was "
+    << "filled before it was read, so the sift compared ranges the sensor "
+    << "never measured.";
+  EXPECT_GE(off_count, on_count - 1.0)
+    << "the scan half a ray off its compared angles was sifted over "
+    << off_count << " rays, where the same ranges on those angles were sifted "
+    << "over " << on_count << ". A compared ray beside the gap reads one ray "
+    << "of it, so the gap grows by one ray at most.";
 }
 
 TEST(Localiser, AHypothesisSetHandedInIsTheSetTheSearchUses)

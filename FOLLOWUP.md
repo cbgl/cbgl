@@ -18,7 +18,7 @@ Table of contents
 
 A scan is reduced once, up front, and the same reduced scan feeds the sift, the refinement and the selection. But the gap filling happens inside the matcher, not before it. So a scan with a run of unmeasured rays is sifted with those rays skipped, while the matcher matches a version of it where they were filled by interpolation across the gap. Measured on a fixture with a forty ray hole, the filled ranges differ from the truth by up to 1.11 m across the chord.
 
-This holds only for a scan that reaches the sift as the sensor gave it: one already `size_scan` rays long, or any scan where `size_scan` is zero, whose rays lie on the angles they are compared at. A scan reduced to fewer rays, or one whose rays lie off those angles, is filled before the sift, so the sift and the matcher see the same filled ranges.
+This holds for a scan already `size_scan` rays long, which every scan is where `size_scan` is zero. One whose rays lie on the angles they are compared at reaches the sift as the sensor gave it. One whose rays lie off them is read at those angles with its gaps left missing, each gap at most one ray wider. A scan reduced to fewer rays is filled before the sift, so the sift and the matcher see the same filled ranges.
 
 This is the division of labour the design asks for: reduction and gap filling belong to the matcher, and the metric counts only rays that are valid on both sides. It is recorded because the sentence "the same reduced scan feeds all three stages" is true of the vector handed over and not of what the matcher then does with it, and somebody will eventually read the first and assume the second.
 
