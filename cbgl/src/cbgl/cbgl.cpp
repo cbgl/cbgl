@@ -85,49 +85,6 @@ Refinement correctedPosesOf(std::span<const ScoredPose> survivors,
 }
 
 /**
- * @brief How many rays a cast must carry for a scan of `rays` rays spanning
- * `aperture` radians to be read against a full turn of map.
- * @details A sensor that sees all the way round is its own answer. One that
- * does not is served by casting the whole turn at the sensor's own angular
- * resolution and comparing only the part of it the sensor could have seen,
- * which is what `prefixOf` and the window in `candidatesOf` then do. Casting
- * the sensor's own ray count over a full turn instead would compare a fraction
- * of a turn of measurement against the whole of one, which is not a worse
- * answer but no answer at all.
- * @remark The rounding is away from zero, which is what the ROS 1 build's own
- * sift does and what the harness that shapes a narrower scan does. All three
- * have to agree on where a window starts or the rays they align are not the
- * same rays.
- */
-std::size_t panoramicRaysOf(const std::size_t rays, const double aperture)
-{
-  if (rays == 0 || !(aperture > 0.0))
-    return rays;
-
-  const double turn =
-    static_cast<double>(rays) * 2.0 * M_PI / aperture;
-
-  const std::size_t panoramic =
-    static_cast<std::size_t>(std::llround(turn));
-
-  return panoramic < rays ? rays : panoramic;
-}
-
-/**
- * @brief How many rays of a panoramic cast sit before the window keeps any.
- * @details The window is centred, so what is dropped is split evenly between
- * the two ends and an odd remainder puts the extra ray at the near end.
- */
-std::size_t prefixOf(const std::size_t panoramic, const std::size_t rays)
-{
-  if (panoramic <= rays)
-    return 0;
-
-  return static_cast<std::size_t>(
-    std::llround(static_cast<double>(panoramic - rays) / 2.0));
-}
-
-/**
  * @brief The sift's own best candidate, returned without refining anything.
  * @details `scored` is already sorted by the same metric the selection would
  * rank a refined pose by, so the cheapest of them is the winner and no cast is
@@ -170,9 +127,9 @@ std::expected<Result, Error> unrefinedResult(std::vector<ScoredPose> scored,
  * survivor.
  * Reduced ray `j` holds the scan read at the angle the window compares that
  * ray at, `-pi + (prefix + j) * 2 * pi / panoramic` from the heading, with
- * `panoramic` and `prefix` from `panoramicRaysOf` and `prefixOf`: the window
- * the sift and the selection take, and the one the refinement takes by the
- * same arithmetic in `fsm_localisation`. The sensor's ray `k` lies at
+ * `panoramic` and `prefix` from `FSM::panoramicRaysOf` and
+ * `FSM::windowPrefixOf`, the window that the sift, the selection and the
+ * refinement in `fsm_localisation` all take. The sensor's ray `k` lies at
  * `angle_min + k * aperture / n` for a scan of `n` rays, so that angle falls
  * between two of the sensor's rays, and the range is interpolated linearly
  * between them. No reduced ray between the sensor's first and last rays is
@@ -226,8 +183,8 @@ std::expected<std::vector<double>, Error::Reason> reducedRanges(
 
   const double increment = aperture / static_cast<double>(scan.size());
 
-  const std::size_t panoramic = panoramicRaysOf(target, aperture);
-  const std::size_t prefix = prefixOf(panoramic, target);
+  const std::size_t panoramic = FSM::panoramicRaysOf(target, aperture);
+  const std::size_t prefix = FSM::windowPrefixOf(panoramic, target);
 
   const auto positionOf = [&](const std::size_t j)
   {
@@ -296,7 +253,7 @@ std::vector<ScoredPose> scoredCandidatesOf(std::span<const Pose> hypotheses,
 
   const std::size_t rays = measured.size();
   const unsigned int num_rays =
-    static_cast<unsigned int>(panoramicRaysOf(rays, aperture));
+    static_cast<unsigned int>(FSM::panoramicRaysOf(rays, aperture));
 
   const auto scoreOne = [&](const std::size_t hypothesis)
   {
@@ -406,7 +363,7 @@ std::vector<Candidate> candidatesOf(const Pose& pose,
 {
   const std::size_t n = cast.size();
   const std::size_t kept = rays == 0 ? n : rays;
-  const std::size_t prefix = prefixOf(n, kept);
+  const std::size_t prefix = FSM::windowPrefixOf(n, kept);
 
   std::vector<Candidate> candidates(da);
 
@@ -562,8 +519,8 @@ std::expected<Result, Error> Localiser::localise(std::span<const double> ranges,
   std::vector<ScoredPose> rescored;
   rescored.reserve(refinement.corrected.size());
 
-  const std::size_t panoramic = panoramicRaysOf(reduced->size(), aperture);
-  const std::size_t prefix = prefixOf(panoramic, reduced->size());
+  const std::size_t panoramic = FSM::panoramicRaysOf(reduced->size(), aperture);
+  const std::size_t prefix = FSM::windowPrefixOf(panoramic, reduced->size());
 
   for (const Pose& pose : refinement.corrected)
   {
