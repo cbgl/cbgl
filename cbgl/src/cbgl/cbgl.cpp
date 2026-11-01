@@ -147,13 +147,15 @@ std::expected<Result, Error> unrefinedResult(std::vector<ScoredPose> scored,
  * are compared at, and the matcher fills both alike. A gap of `m` rays
  * between two measured readings therefore leaves missing the reduced rays
  * that lie strictly between those two, `m + 1` of the sensor's spacings
- * apart: at most `ceil((m + 1) * r)` of them, `r` being the sensor's
- * spacing over the compared spacing. Where the two agree, `r` is 1 and the
- * gap grows by one ray at most. Where they do not, `r` is the compared rays a
- * turn holds over the sensor's rays it holds, which differ by a ray at most,
- * and the gap grows by two rays at most. 500 rays `2 * pi / 999.6` apart are
- * compared `2 * pi / 1000` apart, `r` is 1.0004, and a gap of 40 of them
- * leaves 41 or 42 reduced rays missing. A gap at an end ray of a narrower
+ * apart, and the gap grows by two rays at most. Away from the seam of a whole
+ * turn that is at most `ceil((m + 1) * r)` of them, `r` being the sensor's
+ * spacing over the compared spacing: one ray more where the two agree. `r` is
+ * the compared rays a turn holds over the sensor's rays it holds, which
+ * differ by a ray at most. Across the seam of a whole turn whose spacing does
+ * not divide the turn one compared step is short, and that bound need not
+ * hold there. 500 rays `2 * pi / 999.6` apart are compared `2 * pi / 1000`
+ * apart, `r` is 1.0004, and a gap of 40 of them leaves 41 or 42 reduced rays
+ * missing. A gap at an end ray of a narrower
  * scan also leaves missing every reduced ray compared beyond that end, each
  * being given the end ray's range.
  * A scan covering a whole turn, one whose ray count `FSM::panoramicRaysOf`
