@@ -5,7 +5,7 @@
 #
 # Launch it with
 #
-#   ros2 launch cbgl cbgl.launch.xml
+#   ros2 launch cbgl_global_localisation cbgl.launch.xml
 #
 # and ask for an answer with
 #

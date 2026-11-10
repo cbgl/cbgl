@@ -61,7 +61,7 @@ from rclpy.qos import DurabilityPolicy, ReliabilityPolicy
 def generate_test_description():
     """Launch one node, configured as this package ships it."""
     node = launch_ros.actions.Node(
-        package='cbgl',
+        package='cbgl_global_localisation',
         executable='cbgl_interface_node',
         name='cbgl',
         output='screen',

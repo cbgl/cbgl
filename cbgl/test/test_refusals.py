@@ -97,7 +97,7 @@ OVERLAP_DELAY = 0.5
 def cbgl_node(node_name, **overrides):
     """Return one node, driven through topics nothing else in the launch shares."""
     return launch_ros.actions.Node(
-        package='cbgl',
+        package='cbgl_global_localisation',
         executable='cbgl_interface_node',
         name=node_name,
         output='screen',

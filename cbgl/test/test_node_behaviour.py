@@ -114,7 +114,7 @@ ROBOT_IN_AGEING_ODOMETRY_LATER = (6.00, -4.00, -1.20)
 def generate_test_description():
     """Launch one node that broadcasts a transform and one that does not."""
     quiet = launch_ros.actions.Node(
-        package='cbgl',
+        package='cbgl_global_localisation',
         executable='cbgl_interface_node',
         name='cbgl',
         output='screen',
@@ -123,7 +123,7 @@ def generate_test_description():
                                     initial_cov_aa=COVARIANCE_AA)],
     )
     broadcasting = launch_ros.actions.Node(
-        package='cbgl',
+        package='cbgl_global_localisation',
         executable='cbgl_interface_node',
         name='cbgl_broadcasting',
         output='screen',
@@ -131,7 +131,7 @@ def generate_test_description():
             tf_broadcast=True, output_pose_topic=BROADCASTING_POSE_TOPIC)],
     )
     ageing = launch_ros.actions.Node(
-        package='cbgl',
+        package='cbgl_global_localisation',
         executable='cbgl_interface_node',
         name='cbgl_ageing',
         output='screen',
@@ -150,7 +150,7 @@ def generate_test_description():
     # ships, because a fixed count of a full turn's length would refuse this
     # scan as too short.
     narrow = launch_ros.actions.Node(
-        package='cbgl',
+        package='cbgl_global_localisation',
         executable='cbgl_interface_node',
         name='cbgl_narrow',
         output='screen',

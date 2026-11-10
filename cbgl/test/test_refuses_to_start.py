@@ -132,7 +132,7 @@ PROCESSES = {}
 def cbgl_node(node_name, **overrides):
     """Return one node, launched with the settings this case is about."""
     return launch_ros.actions.Node(
-        package='cbgl',
+        package='cbgl_global_localisation',
         executable='cbgl_interface_node',
         name=node_name,
         output='screen',

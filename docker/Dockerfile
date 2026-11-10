@@ -58,7 +58,7 @@ RUN sudo apt-get -y update                                                  && \
 # is why only two arguments reach this build rather than four.
 RUN source /opt/ros/lyrical/setup.bash                                      && \
     cd /home/${USER}/ros2_ws                                                && \
-    colcon build --packages-up-to cbgl                                        \
+    colcon build --packages-up-to cbgl_global_localisation                     \
       --cmake-args                                                             \
         -DFSM_LOCALISATION_EXACT_FP=${FSM_LOCALISATION_EXACT_FP}               \
         -DFSM_LOCALISATION_DETERMINISTIC_FFT=${FSM_LOCALISATION_DETERMINISTIC_FFT}
@@ -86,4 +86,4 @@ WORKDIR /home/${USER}
 # took the full ten second grace period and killed the node with no shutdown at
 # all, against one second and an orderly shutdown with this line.
 STOPSIGNAL SIGINT
-CMD ["/bin/bash", "-lc", "exec ros2 launch cbgl cbgl.launch.xml"]
+CMD ["/bin/bash", "-lc", "exec ros2 launch cbgl_global_localisation cbgl.launch.xml"]

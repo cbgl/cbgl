@@ -96,7 +96,7 @@ UPSIDE_DOWN_SENSOR_FRAME = 'upside_down_sensor_frame'
 def generate_test_description():
     """Launch one node, to be handed a scan from each of two mountings."""
     node = launch_ros.actions.Node(
-        package='cbgl',
+        package='cbgl_global_localisation',
         executable='cbgl_interface_node',
         name='cbgl',
         output='screen',

@@ -122,14 +122,14 @@ SCAN_TYPE = 'sensor_msgs/msg/LaserScan'
 def generate_test_description():
     """Launch the nodes the optional topics are asked of, named and not."""
     quiet = launch_ros.actions.Node(
-        package='cbgl',
+        package='cbgl_global_localisation',
         executable='cbgl_interface_node',
         name='cbgl',
         output='screen',
         parameters=[node_parameters(output_pose_topic=QUIET_POSE_TOPIC)],
     )
     named = launch_ros.actions.Node(
-        package='cbgl',
+        package='cbgl_global_localisation',
         executable='cbgl_interface_node',
         name='cbgl_named',
         output='screen',
@@ -140,7 +140,7 @@ def generate_test_description():
             map_scan_topic=MAP_SCAN_TOPIC)],
     )
     overlaid = launch_ros.actions.Node(
-        package='cbgl',
+        package='cbgl_global_localisation',
         executable='cbgl_interface_node',
         name='cbgl_overlaid',
         output='screen',
@@ -152,7 +152,7 @@ def generate_test_description():
             map_scan_topic=OVERLAID_MAP_SCAN_TOPIC)],
     )
     reduced = launch_ros.actions.Node(
-        package='cbgl',
+        package='cbgl_global_localisation',
         executable='cbgl_interface_node',
         name='cbgl_reduced',
         output='screen',

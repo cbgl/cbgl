@@ -97,7 +97,7 @@ SCAN_QOS_RELIABILITY = 'best_effort'
 def generate_test_description():
     """Launch one node subscribed to scans best effort and five deep."""
     node = launch_ros.actions.Node(
-        package='cbgl',
+        package='cbgl_global_localisation',
         executable='cbgl_interface_node',
         name='cbgl',
         output='screen',

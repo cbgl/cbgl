@@ -97,7 +97,7 @@ BELOW_SECTOR = (math.radians(-45.0), math.radians(60.0))
 def generate_test_description():
     """Launch one node, to be handed one scan read two ways."""
     node = launch_ros.actions.Node(
-        package='cbgl',
+        package='cbgl_global_localisation',
         executable='cbgl_interface_node',
         name='cbgl',
         output='screen',

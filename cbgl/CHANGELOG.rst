@@ -1,6 +1,17 @@
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Changelog for package cbgl
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Changelog for package cbgl_global_localisation
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Forthcoming
+-----------
+* Renames the ROS package from ``cbgl`` to ``cbgl_global_localisation``,
+  so that the name says what the package does. The apt package becomes
+  ``ros-lyrical-cbgl-global-localisation``. ``ros2 launch``, ``ros2 run``,
+  ``colcon build --packages-up-to`` and ``find_package`` take the new name,
+  and the exported targets are ``cbgl_global_localisation::cbgl_core`` and
+  so on. The repository, the node name ``cbgl``, the executable
+  ``cbgl_interface_node``, the launch file, the headers and the C++ names
+  do not change. Version 1.0.0 under the old name was not released.
 
 1.0.0 (2026-11-10)
 ------------------

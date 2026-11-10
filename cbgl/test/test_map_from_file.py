@@ -99,7 +99,7 @@ def generate_test_description():
     description = write_map_file(DIRECTORY[0], read_grid(GRID))
 
     node = launch_ros.actions.Node(
-        package='cbgl',
+        package='cbgl_global_localisation',
         executable='cbgl_interface_node',
         name=NODE_NAME,
         output='screen',
@@ -114,7 +114,7 @@ def generate_test_description():
     # what it is asked is whether it subscribed, because subscribing is the
     # observable difference between the two routes.
     both = launch_ros.actions.Node(
-        package='cbgl',
+        package='cbgl_global_localisation',
         executable='cbgl_interface_node',
         name=BOTH_NODE_NAME,
         output='screen',

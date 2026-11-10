@@ -64,6 +64,8 @@ Steps 2 and 3 are where the time goes, and the second of the two dominates. See 
 
 ## Installation
 
+The ROS package is named `cbgl_global_localisation`. The repository, the node and its executable `cbgl_interface_node` keep the name `cbgl`.
+
 ### With Docker
 
 The image carries both this package and `fsm_localisation`, so the build context spans the directory that holds both repositories rather than this one alone.
@@ -100,13 +102,13 @@ git clone git@github.com:fourier-scan-matcher/fsm-localisation.git
 
 cd ~/ros2_ws
 rosdep install --from-paths src --ignore-src -r -y
-colcon build --packages-up-to cbgl
+colcon build --packages-up-to cbgl_global_localisation
 ```
 
 Two build options exist for comparing builds rather than for running a robot. Both cost speed, both default off, and **both belong to `fsm_localisation` rather than to this package.** `FSM_LOCALISATION_EXACT_FP` builds at `-O2 -fno-fast-math -ffp-contract=off` instead of `-Ofast`, so that two compilers agree. `FSM_LOCALISATION_DETERMINISTIC_FFT` makes the matcher's transform plans chosen by heuristic rather than by timing, so that two runs agree.
 
 ```sh
-colcon build --packages-up-to cbgl --cmake-args \
+colcon build --packages-up-to cbgl_global_localisation --cmake-args \
   -DFSM_LOCALISATION_EXACT_FP=ON -DFSM_LOCALISATION_DETERMINISTIC_FFT=ON
 ```
 
@@ -118,16 +120,16 @@ Five libraries are exported. Link the narrowest one that does what you need.
 
 | Target | Knows about | Use it for |
 | --- | --- | --- |
-| `cbgl::cbgl_core` | nothing of ROS, not even a message type | the algorithm itself, given a grid and a scan |
-| `cbgl::cbgl_grid` | occupancy grid messages, no `rclcpp` | turning a map message into the free space the search draws from |
-| `cbgl::cbgl_map_file` | occupancy grid messages and `yaml-cpp`, no `rclcpp` | reading a map description file and its PGM into a map message |
-| `cbgl::cbgl_interface` | everything ROS | embedding the node in a process of your own |
+| `cbgl_global_localisation::cbgl_core` | nothing of ROS, not even a message type | the algorithm itself, given a grid and a scan |
+| `cbgl_global_localisation::cbgl_grid` | occupancy grid messages, no `rclcpp` | turning a map message into the free space the search draws from |
+| `cbgl_global_localisation::cbgl_map_file` | occupancy grid messages and `yaml-cpp`, no `rclcpp` | reading a map description file and its PGM into a map message |
+| `cbgl_global_localisation::cbgl_interface` | everything ROS | embedding the node in a process of your own |
 
 Every target above reaches CGAL and FFTW through `fsm_localisation`. See [Licensing](#licensing).
 
 ```cmake
-find_package(cbgl REQUIRED)
-target_link_libraries(your_target cbgl::cbgl_core)
+find_package(cbgl_global_localisation REQUIRED)
+target_link_libraries(your_target cbgl_global_localisation::cbgl_core)
 ```
 
 ## Run
@@ -135,7 +137,7 @@ target_link_libraries(your_target cbgl::cbgl_core)
 ### Launch
 
 ```sh
-ros2 launch cbgl cbgl.launch.xml
+ros2 launch cbgl_global_localisation cbgl.launch.xml
 ```
 
 The launch takes `namespace`, defaulting to `/`, `node_name`, defaulting to `cbgl`, and `params`, defaulting to the shipped `config/params.yaml`. Two nodes may not share a name, so a second node is this same file launched again with a name and a parameter file of its own.
@@ -454,7 +456,7 @@ What a **redistributed binary** carries is a different question, and the answer 
 | FFTW | `fsm_localisation` | GPL v2 or later |
 | the ray casting inside `fsm_localisation` | `fsm_localisation` | Apache 2.0 |
 
-FFTW's terms allow version 3, so the two GPL rows combine to GPL v3 rather than conflicting. That is worth saying rather than leaving a reader to check it. The GPL v3 text travels with the work as that licence asks: [COPYING](COPYING), installed into `share/cbgl` so that it reaches a built tree and not only these sources.
+FFTW's terms allow version 3, so the two GPL rows combine to GPL v3 rather than conflicting. That is worth saying rather than leaving a reader to check it. The GPL v3 text travels with the work as that licence asks: [COPYING](COPYING), installed into `share/cbgl_global_localisation` so that it reaches a built tree and not only these sources.
 
 The ROS 1 version also carried LGPL v2.1 and Apache 2.0 obligations from amcl's map and particle filter and from a vendored ray casting library. Both are gone from these sources along with the code that brought them.
 
