@@ -2,8 +2,8 @@
 Changelog for package cbgl
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+1.0.0 (2026-11-10)
+------------------
 * Declares as test dependencies the packages that the Python tests import
   and that the manifest did not name: ``launch``, ``launch_testing``,
   ``python3-pytest`` and ``tf2_msgs``. Before, the tests got them only
