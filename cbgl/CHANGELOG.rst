@@ -4,6 +4,10 @@ Changelog for package cbgl
 
 Forthcoming
 -----------
+* Declares as test dependencies the packages that the Python tests import
+  and that the manifest did not name: ``launch``, ``launch_testing``,
+  ``python3-pytest`` and ``tf2_msgs``. Before, the tests got them only
+  through other packages.
 * Reads a compared ray that lies within a rounding slack of one of the
   sensor's rays from that ray alone. Computed in doubles, such an angle
   carries a residue of either sign, and one towards a missing neighbour read
