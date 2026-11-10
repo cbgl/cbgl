@@ -2,8 +2,8 @@
 Changelog for package cbgl_global_localisation
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+1.0.1 (2026-11-10)
+------------------
 * Renames the ROS package from ``cbgl`` to ``cbgl_global_localisation``,
   so that the name says what the package does. The apt package becomes
   ``ros-lyrical-cbgl-global-localisation``. ``ros2 launch``, ``ros2 run``,

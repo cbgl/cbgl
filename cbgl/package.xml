@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package format="3">
   <name>cbgl_global_localisation</name>
-  <version>1.0.0</version>
+  <version>1.0.1</version>
   <description>Global localisation of a 2D lidar sensor in a 2D occupancy grid, under global uncertainty in position and orientation, from a single scan.</description>
   <maintainer email="alexandros.filotheou@gmail.com">Alexandros Filotheou</maintainer>
   <author email="alexandros.filotheou@gmail.com">Alexandros Filotheou</author>
