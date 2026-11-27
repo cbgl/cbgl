@@ -18,7 +18,7 @@ The sensor's own frame is not a parameter. The node reads it from the scan messa
 
 The ROS 1 package offered a second refinement, Andrea Censi's canonical scan matcher, and shipped with it selected. **That path is not carried here.** It was carried, and it was removed after the scan matcher was measured against it.
 
-The measurement used three quarters of a turn and a thousand trials. The scan matcher answers 99.6 per cent of trials inside half a metre and five degrees, with a median error of 0.8 mm. The canonical scan matcher answers 99.8 per cent, with a median error of 4.3 mm. The scan matcher is also the quicker of the two.
+The measurement used three quarters of a turn and a thousand trials. The scan matcher answers 99.6 per cent of trials inside half a metre and five degrees, with a median error of 0.8 mm. The canonical scan matcher answers 99.8 per cent, with a median error of 4.3 mm. The scan matcher is also the quicker of the two. At a full turn, the scan matcher was ahead on every measure.
 
 The canonical scan matcher cost an LGPL v3 dependency with no ROS 2 release. It also cost three patches against a commit that upstream has not moved since 2022. One of those patches corrected a write past the end of a buffer. Nothing that the canonical scan matcher did was worth that cost.
 

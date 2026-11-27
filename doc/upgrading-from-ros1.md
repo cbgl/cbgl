@@ -4,7 +4,7 @@ The ROS 1 Kinetic package is on the `kinetic-devel` branch. This version is not 
 
 ## Which ROS 1 state to compare against
 
-**The `kinetic-devel` branch has moved, so the commit that you check a behaviour against matters.** Between 1 July 2024 and 25 February 2026, the branch could not localise with the configuration that it shipped. Its tip has since been repaired. So three states are worth telling apart:
+**The `kinetic-devel` branch has moved, so the commit that you check a behaviour against matters.** Between 2 July 2024 and 25 February 2026, the branch could not localise with the configuration that it shipped. Its tip has since been repaired. So three states are worth telling apart:
 
 | State | What it does |
 | --- | --- |
@@ -38,7 +38,7 @@ Two of those repairs bore on maps away from the world origin, which the ROS 2 ve
 
 | Setting | Why |
 | --- | --- |
-| `do_icp`, `do_fsm` | replaced by `refinement_method`, one setting with one value, where two booleans could say both or neither. **The ROS 1 package shipped `do_icp: true`**, so anyone running its shipped configuration was refining by the point to line solver. That path is not carried here at all. The scan matcher was measured against it and matches or beats it at every aperture, so the dependency it needed was dropped, not ported |
+| `do_icp`, `do_fsm` | replaced by `refinement_method`, one setting with one value, where two booleans could say both or neither. **The ROS 1 package shipped `do_icp: true`**, so anyone running its shipped configuration was refining by the point to line solver. That path is not carried here at all. The scan matcher was measured against it at a full turn and at three quarters of a turn. [Refinement](parameters.md#refinement) gives the figures. The dependency it needed was dropped, not ported |
 | `laser_z_orientation` | in the ROS 1 build it says which way the sensor's z axis points. Its shipped value, `upwards`, compensates for that build reading the grid's rows in reverse, and the replacement map handles the origin's translation, its rotation and its row order itself. `downwards` serves a sensor mounted upside down. This version reads that from the sensor's placement in the transform tree, so there is nothing to set. The ROS 1 build still needs `downwards` set for such a sensor |
 | the `vanilla` value of `map_scan_method` | it selected a second ray tracer that is gone. The three surviving names are `ray_marching`, `bresenham` and `cddt`, and any other name is refused at start-up. `vanilla` was also what ROS 1 fell back to when the setting was absent, so a configuration that never named one must name one now |
 | `do_undersample_scan`, `undersample_rate` | `size_scan` does this, and does it by resampling, not by dropping every nth ray |

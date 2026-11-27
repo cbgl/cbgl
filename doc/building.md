@@ -30,7 +30,7 @@ docker compose build \
 
 ## As a dependency of your own package
 
-Five libraries are exported. Link the narrowest one that does what you need.
+Four libraries are exported. Link the narrowest one that does what you need.
 
 | Target | Knows about | Use it for |
 | --- | --- | --- |
