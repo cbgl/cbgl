@@ -43,8 +43,8 @@
  * broadcast switch is a boolean. Declaring a real number as an integer would
  * refuse `dl: 0.5` at launch for no reason a reader of the documentation could
  * anticipate, so the type is asserted alongside the value.
- * A node is built and then let go before is built, two nodes of the same name being two answers to one
- * service address.
+ * Each case builds its own node and lets it go before the next case builds
+ * one, two nodes of the same name being two answers to one service address.
  * @remark No setting is declared with a `ParameterDescriptor` carrying a range,
  * deliberately, and this is the place to say why so that nobody adds one as an
  * improvement. A range in a descriptor makes `rclcpp` reject an out of range
@@ -461,9 +461,7 @@ TEST(NodeParameters, TheNodeAnswersToTheNameItsServiceIsAddressedBy)
  * @details Skipped while the readme carries no parameter table, which is the
  * state of it until the documentation is written. The stage that writes it turns
  * this on and nothing else has to change here.
- * Two nodes are built rather than one, and one at a time. Twenty six of the
- * rows belong to a refinement whose settings a node declares only where it is
- * the one chosen, so a single node cannot be asked about every row there is.
+ * One node is built, because it declares every setting that the tables list.
  * @remark A default is compared after every space, backtick and capital has
  * been taken out of the cell, so a table is free to format itself. Two
  * spellings are understood beyond the value itself: `empty` for a setting whose
