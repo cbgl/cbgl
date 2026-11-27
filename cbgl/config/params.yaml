@@ -152,9 +152,10 @@
 
     # How many of the scored candidates are refined by scan matching. The
     # refinement is what turns a candidate into an answer, and it is the
-    # expensive half of a run, so this is the first setting to lower where a run
-    # takes too long. Where the map offers fewer candidates than this asks for,
-    # every candidate is refined and the node says so.
+    # expensive half of a run where many survivors are refined, so lowering it
+    # shortens a run. size_scan is the other setting to lower, and in the room
+    # of doc/performance.md it saves more. Where the map offers fewer candidates
+    # than this asks for, every candidate is refined and the node says so.
     top_k_caers: 10
 
     # 0 draws the hypotheses from hardware entropy, which is what a robot wants.
@@ -209,8 +210,10 @@
     # what keeps a narrower sensor from being refused for its ray count.
     #
     # Any other value reduces every scan to that many rays and refuses a scan
-    # carrying fewer. Execution time rises faster than the ray count does, so
-    # this is the setting to reach for when an answer takes too long.
+    # carrying fewer. Lowering this value shortens a run. In the room of
+    # doc/performance.md, a quarter of the rays made the first call after a map
+    # arrives about eight times as quick, and later calls a little over twice as
+    # quick.
     size_scan: 0
 
     # Base angular oversampling, and the maximum it may reach. Larger values buy

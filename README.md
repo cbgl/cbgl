@@ -280,7 +280,7 @@ A refused run publishes no pose. The service response gives the reason as a sent
 
 ## Performance
 
-`top_k_caers` is the setting to lower when a run takes too long. [Performance](doc/performance.md) gives the measured execution times, and explains what the map costs and what it bounds.
+`size_scan` and `top_k_caers` are the two settings to lower when a run takes too long. In the room where the timings were measured, lowering `size_scan` saved more, most of all on the first call after a map arrives. [Performance](doc/performance.md) gives the measured execution times, and explains what the map costs and what it bounds.
 
 ## Licensing
 
