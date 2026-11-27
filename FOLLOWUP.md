@@ -1,6 +1,6 @@
 # Known gaps and deferred work
 
-Recorded while this package was carried from ROS 1 Kinetic to ROS 2 Lyrical, and while its own copies of the scan matcher and the ray casting were replaced by `fsm_localisation` taken as a dependency. Nothing here stops the package answering. Every gap was left alone deliberately, and the reason is given so that the decision can be revisited rather than rediscovered. The last section is the exception in kind rather than in treatment: it holds three questions that a comparison against the ROS 1 build was meant to settle and has not yet been run to settle.
+Recorded while this package was carried from ROS 1 Kinetic to ROS 2 Lyrical, and while its own copies of the scan matcher and the ray casting were replaced by `fsm_localisation` taken as a dependency. Nothing here stops the package answering. Every gap was left alone deliberately, and the reason is given so that the decision can be revisited rather than rediscovered. The last section is the exception. It records a comparison against the ROS 1 build, which has been run. That comparison settled two of the three questions it was meant to settle, and the third is still open.
 
 Table of contents
 =================
@@ -10,7 +10,7 @@ Table of contents
 * [The node](#the-node)
 * [What the tests do not cover](#what-the-tests-do-not-cover)
 * [Build, packaging and linting](#build-packaging-and-linting)
-* [Three questions the comparison against the ROS 1 build has still to settle](#three-questions-the-comparison-against-the-ros-1-build-has-still-to-settle)
+* [What the comparison against the ROS 1 build settled, and the one thing it did not](#what-the-comparison-against-the-ros-1-build-settled-and-the-one-thing-it-did-not)
 
 ## The algorithm
 
@@ -42,30 +42,11 @@ A drawn position is the centre of a free cell. On a map of twenty centimetre cel
 
 ### A sensor that does not see all the way round is supported, with one caveat
 
-This was a gap and is no longer one. The map is read all the way round at the
-angular resolution of the scan the sift works from, the sensor's own where
-`size_scan` is 0, which is more readings than that scan carries, and only the
-middle window of that is compared: the part of the turn the
-sensor could have seen. The rotation that yields a candidate is still over
-the whole turn, so what a candidate is labelled with does not depend on the
-aperture.
+This was a gap and is no longer one. The map is read all the way round at the angular resolution of the scan the sift works from, the sensor's own where `size_scan` is 0, which is more readings than that scan carries, and only the middle window of that is compared: the part of the turn the sensor could have seen. The rotation that yields a candidate is still over the whole turn, so what a candidate is labelled with does not depend on the aperture.
 
-There used to be a caveat here saying the refinement did not follow, so a
-narrower sensor wanted `refinement_method: "icp"`, and that nothing measured
-the other combination. Nothing did, and when it finally was measured the
-caveat turned out to be describing a defect rather than a property. The scan
-matcher refinement was never told what the sensor covered, so it read the map
-over a whole turn and matched it against a fraction of one. That is repaired in
-`fsm_localisation`, whose corrector now takes the aperture as a required
-argument. The `icp` value was removed later, and the scan matcher, now the only
-refinement, follows the sensor at any aperture it can cover.
+There used to be a caveat here saying the refinement did not follow, so a narrower sensor wanted `refinement_method: "icp"`, and that nothing measured the other combination. Nothing did, and when it finally was measured the caveat turned out to be describing a defect rather than a property. The scan matcher refinement was never told what the sensor covered, so it read the map over a whole turn and matched it against a fraction of one. That is repaired in `fsm_localisation`, whose corrector now takes the aperture as a required argument. The `icp` value was removed later, and the scan matcher, now the only refinement, follows the sensor at any aperture it can cover.
 
-A scan whose first ray does not sit half its own span behind the sensor's
-heading, or which claims to span more than a turn, is still refused at the
-point of use rather than answered wrongly. Refusing is the honest form of the
-limitation: such a scan is perfectly legal, and reading it as though it agreed
-with this convention would return a confident answer rotated by whatever the
-two differ by.
+A scan whose first ray does not sit half its own span behind the sensor's heading, or which claims to span more than a turn, is still refused at the point of use rather than answered wrongly. Refusing is the honest form of the limitation: such a scan is perfectly legal, and reading it as though it agreed with this convention would return a confident answer rotated by whatever the two differ by.
 
 ## The node
 
